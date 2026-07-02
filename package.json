@@ -1,0 +1,52 @@
+{
+  "name": "rover-preview-helper",
+  "version": "0.1.0",
+  "description": "Open-source Rover preview helper Chrome extension",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@9.12.0",
+  "type": "module",
+  "main": "main.cjs",
+  "build": {
+    "appId": "com.multirecorder.app",
+    "productName": "MultiRecorder",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "extraResources": [
+      {
+        "from": "app-assets",
+        "to": "app-assets",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "start": "electron .",
+    "package:app": "node scripts/build-electron.mjs",
+    "build": "node scripts/build.mjs",
+    "clean": "node scripts/clean.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "test": "node --test src/*.test.mjs scripts/*.test.mjs",
+    "record:all": "node scripts/multi-recorder.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.18",
+    "playwright-core": "^1.61.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@rtrvr-ai/cli": "^0.2.1",
+    "electron": "43.0.0",
+    "electron-builder": "^26.15.3",
+    "playwright": "^1.61.1"
+  }
+}

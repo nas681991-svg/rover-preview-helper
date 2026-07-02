@@ -1,0 +1,242 @@
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const { chromium } = require('playwright-extra');
+const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+const fs = require('fs');
+const AdmZip = require('adm-zip');
+const isWin = process.platform === 'win32';
+
+chromium.use(stealthPlugin());
+
+const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
+const bugbugDir = path.join(extDataDir, 'bugbug');
+const sbaseExtDir = path.join(extDataDir, 'sbase-recorder');
+const tlRecorderDir = path.join(extDataDir, 'tl-recorder');
+
+const EXTENSION_SOURCES = [
+  {
+    name: 'Bugbug',
+    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc',
+    destZip: () => path.join(extDataDir, 'bugbug.crx'),
+    extractDir: bugbugDir,
+    isCrx: true,
+  },
+  {
+    name: 'SeleniumBase',
+    url: 'https://github.com/seleniumbase/SeleniumBase/raw/master/seleniumbase/extensions/recorder.zip',
+    destZip: () => path.join(extDataDir, 'recorder.zip'),
+    extractDir: sbaseExtDir,
+    isCrx: false,
+  },
+  {
+    name: 'Testing Library Recorder',
+    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Dngnajohkpnidkckedcjmkmkndkpgffij%26uc',
+    destZip: () => path.join(extDataDir, 'tl-recorder.crx'),
+    extractDir: tlRecorderDir,
+    isCrx: true,
+  },
+];
+
+const assetsDir = path.join(process.resourcesPath, 'app-assets');
+const localAssetsDir = path.join(__dirname, 'app-assets');
+const activeAssetsDir = fs.existsSync(assetsDir) ? assetsDir : localAssetsDir;
+const roverExtDir = path.join(activeAssetsDir, 'rover');
+
+let mainWindow;
+
+async function downloadExtensionUpdate(url, destZip, extractDir, isCrx = false) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Failed to download from ${url}`);
+    const buffer = await response.arrayBuffer();
+    let zipBuffer = Buffer.from(buffer);
+
+    if (isCrx) {
+      const magic = zipBuffer.readUInt32LE(0);
+      if (magic === 0x34327243) { // 'Cr24'
+        const version = zipBuffer.readUInt32LE(4);
+        if (version === 2) {
+          const publicKeyLength = zipBuffer.readUInt32LE(8);
+          const signatureLength = zipBuffer.readUInt32LE(12);
+          zipBuffer = zipBuffer.slice(16 + publicKeyLength + signatureLength);
+        } else if (version === 3) {
+          const headerSize = zipBuffer.readUInt32LE(8);
+          zipBuffer = zipBuffer.slice(12 + headerSize);
+        }
+      }
+    }
+
+    fs.mkdirSync(path.dirname(destZip), { recursive: true });
+    fs.writeFileSync(destZip, zipBuffer);
+
+    const zip = new AdmZip(destZip);
+    await new Promise((resolve, reject) => {
+      zip.extractAllToAsync(extractDir, true, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+ipcMain.handle('launch-recorder', async () => {
+  try {
+    fs.mkdirSync(extDataDir, { recursive: true });
+    
+    for (const ext of EXTENSION_SOURCES) {
+      try {
+        await downloadExtensionUpdate(ext.url, ext.destZip(), ext.extractDir, ext.isCrx);
+      } catch (e) {
+        console.error(`${ext.name} update failed:`, e);
+      }
+    }
+
+    const extensions = [roverExtDir];
+    for (const ext of EXTENSION_SOURCES) {
+      if (fs.existsSync(ext.extractDir)) extensions.push(ext.extractDir);
+    }
+    const extensionsStr = extensions.join(',');
+    
+    const userDataDir = path.join(app.getPath('userData'), 'browser-data');
+    const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
+    fs.mkdirSync(myRecordsPath, { recursive: true });
+
+    let context = null;
+    let launchError = null;
+    const channels = ['chrome', 'msedge'];
+    
+    for (const channel of channels) {
+      try {
+        context = await chromium.launchPersistentContext(userDataDir, {
+          headless: false,
+          channel: channel, 
+          acceptDownloads: true,
+          downloadsPath: myRecordsPath,
+          args: [
+            `--disable-extensions-except=${extensionsStr}`,
+            `--load-extension=${extensionsStr}`,
+            '--disable-blink-features=AutomationControlled'
+          ]
+        });
+        break; // successfully launched
+      } catch (err) {
+        launchError = err;
+      }
+    }
+
+    if (!context) {
+      throw new Error(`Failed to launch browser. Please ensure Google Chrome or Microsoft Edge is installed on your system. Details: ${launchError?.message}`);
+    }
+    
+    // Start Native Playwright Tracing
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    
+    let tracingStopped = false;
+    const stopTracing = async () => {
+      if (tracingStopped) return;
+      tracingStopped = true;
+      try {
+        const tracePath = path.join(myRecordsPath, `trace-${Date.now()}.zip`);
+        await context.tracing.stop({ path: tracePath });
+      } catch (e) {
+        console.error('Failed to save trace:', e);
+      }
+    };
+
+    // Use a counter to track open pages instead of context.pages().length
+    // which is unreliable during close events.
+    let openPageCount = context.pages().length;
+    const attachPageListener = (page) => {
+      page.on('close', async () => {
+        openPageCount--;
+        if (openPageCount <= 0) {
+          await stopTracing();
+        }
+      });
+    };
+
+    // Attach to existing pages
+    context.pages().forEach(attachPageListener);
+    // Attach to future pages
+    context.on('page', (page) => {
+      openPageCount++;
+      attachPageListener(page);
+    });
+    // Safety net: stop tracing when the entire context closes
+    context.on('close', () => void stopTracing());
+
+    const page1 = context.pages()[0] || await context.newPage();
+    await page1.goto('https://app.bugbug.io/sign-in/');
+    const page2 = await context.newPage();
+    await page2.goto('https://rover.rtrvr.ai/login');
+    const page3 = await context.newPage();
+    await page3.goto('https://google.com'); 
+    await page3.bringToFront();
+
+    // Wait for the browser to be closed by the user before reporting success.
+    await new Promise(resolve => context.on('close', resolve));
+    await stopTracing();
+    return 'success';
+  } catch (error) {
+    console.error(error);
+    return error.message || 'Unknown error occurred launching Playwright';
+  }
+});
+
+ipcMain.handle('list-records', async () => {
+  try {
+    const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
+    if (!fs.existsSync(myRecordsPath)) return [];
+    const files = fs.readdirSync(myRecordsPath);
+    return files.map(file => ({
+      name: file,
+      path: path.join(myRecordsPath, file)
+    })).sort((a,b) => b.name.localeCompare(a.name));
+  } catch (err) {
+    console.error(err);
+    return [];
+  }
+});
+
+ipcMain.handle('read-record', async (event, filePath) => {
+  try {
+    const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
+    const resolved = path.resolve(filePath);
+    const normalizedResolved = isWin ? resolved.toLowerCase() : resolved;
+    const normalizedBase = isWin ? myRecordsPath.toLowerCase() : myRecordsPath;
+    if (!normalizedResolved.startsWith(normalizedBase)) {
+      return 'Error: Access denied — path outside MyRecords directory.';
+    }
+    return fs.readFileSync(resolved, 'utf-8');
+  } catch (err) {
+    return `Error reading file: ${err.message}`;
+  }
+});
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  mainWindow.loadFile('index.html');
+}
+
+app.whenReady().then(() => {
+  createWindow();
+  app.on('activate', function () {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', function () {
+  if (process.platform !== 'darwin') app.quit();
+});

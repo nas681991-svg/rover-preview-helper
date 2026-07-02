@@ -1,0 +1,22 @@
+{
+  "source": "https://rover.rtrvr.ai",
+  "fetchedAt": "2026-07-01T05:12:04.302Z",
+  "files": [
+    {
+      "name": "embed",
+      "file": "rover-embed.js",
+      "url": "https://rover.rtrvr.ai/embed-core.js",
+      "bytes": 1259967,
+      "etag": "W/\"a5867042979294634791cdef900347cb\"",
+      "lastModified": "Wed, 01 Jul 2026 02:46:22 GMT"
+    },
+    {
+      "name": "worker",
+      "file": "worker.js",
+      "url": "https://rover.rtrvr.ai/worker/worker.js",
+      "bytes": 316024,
+      "etag": "W/\"a4b1d6982c25998e6572142fe6585907\"",
+      "lastModified": "Wed, 01 Jul 2026 02:46:23 GMT"
+    }
+  ]
+}
