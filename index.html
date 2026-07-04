@@ -33,6 +33,15 @@
     button.launch:hover {
       background-color: #005a9e;
     }
+    select.mode-selector {
+      padding: 12px;
+      font-size: 16px;
+      margin-right: 10px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background-color: #2d2d2d;
+      color: #fff;
+    }
     #status {
       margin-top: 10px;
       font-size: 14px;
@@ -94,7 +103,15 @@
 <body>
   <header>
     <h1>Multi-Recorder Dashboard</h1>
-    <button id="launchBtn" class="launch">Launch Browser</button>
+    <div style="margin-top: 15px;">
+      <select id="modeSelect" class="mode-selector">
+        <option value="playwright-trace">Playwright Trace Mode</option>
+        <option value="rover">Rover Preview Mode</option>
+        <option value="bugbug">Bugbug Cloud Mode</option>
+        <option value="seleniumbase">SeleniumBase Recorder Mode</option>
+      </select>
+      <button id="launchBtn" class="launch">Launch Browser</button>
+    </div>
     <div id="status">Ready</div>
   </header>
   

@@ -18,6 +18,7 @@ const MAX_IN_MEMORY_STATES = 50;
 const inMemoryState = new Map();
 const pendingInjects = new Map();
 const refreshPromises = new Map();
+const pendingHydrations = new Map();
 const PERSISTED_CONFIG_KEY = 'rover-preview-helper:last-config';
 
 async function persistConfig(config) {
@@ -230,29 +231,53 @@ async function refreshStateFromBackend(tabId, state, tabUrl, options = {}) {
 async function maybeHydratePreviewFromUrl(tabId, tabUrl) {
   const params = extractPreviewLaunchParams(tabUrl);
   if (!params) return null;
-  const config = await fetchPreviewConfig(params, tabUrl);
-  await sanitizeTabUrl(tabId, tabUrl);
-  return await injectFromTab(tabId, config);
+
+  const key = `${tabId}:${tabUrl}`;
+  if (pendingHydrations.has(key)) return pendingHydrations.get(key);
+
+  const promise = (async () => {
+    try {
+      const config = await fetchPreviewConfig(params, tabUrl);
+      await sanitizeTabUrl(tabId, tabUrl);
+      return await injectFromTab(tabId, config);
+    } finally {
+      setTimeout(() => pendingHydrations.delete(key), 1000);
+    }
+  })();
+  pendingHydrations.set(key, promise);
+  return promise;
 }
 
 async function maybeHydrateGenericConfigFromUrl(tabId, tabUrl) {
   if (!hasHelperConfigFragment(tabUrl)) return null;
-  const rawConfig = extractHelperConfigFragment(tabUrl);
-  if (!rawConfig) return null;
-  const config = normalizeConfig(rawConfig);
-  await sanitizeTabUrl(tabId, tabUrl);
-  if (config.previewId && config.previewToken) {
-    const previewConfig = await fetchPreviewConfig({
-      previewId: config.previewId,
-      previewToken: config.previewToken,
-      apiBase: config.apiBase,
-    }, tabUrl);
-    return await injectFromTab(tabId, {
-      ...config,
-      ...previewConfig,
-    });
-  }
-  return await injectFromTab(tabId, config);
+
+  const key = `${tabId}:${tabUrl}`;
+  if (pendingHydrations.has(key)) return pendingHydrations.get(key);
+
+  const promise = (async () => {
+    try {
+      const rawConfig = extractHelperConfigFragment(tabUrl);
+      if (!rawConfig) return null;
+      const config = normalizeConfig(rawConfig);
+      await sanitizeTabUrl(tabId, tabUrl);
+      if (config.previewId && config.previewToken) {
+        const previewConfig = await fetchPreviewConfig({
+          previewId: config.previewId,
+          previewToken: config.previewToken,
+          apiBase: config.apiBase,
+        }, tabUrl);
+        return await injectFromTab(tabId, {
+          ...config,
+          ...previewConfig,
+        });
+      }
+      return await injectFromTab(tabId, config);
+    } finally {
+      setTimeout(() => pendingHydrations.delete(key), 1000);
+    }
+  })();
+  pendingHydrations.set(key, promise);
+  return promise;
 }
 
 function buildTargetHost(tabUrl, fallbackState) {

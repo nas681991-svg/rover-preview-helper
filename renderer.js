@@ -28,10 +28,13 @@ async function refreshFiles() {
 document.getElementById('launchBtn').addEventListener('click', async () => {
   const btn = document.getElementById('launchBtn');
   const statusEl = document.getElementById('status');
+  const modeSelect = document.getElementById('modeSelect');
+  const mode = modeSelect ? modeSelect.value : 'playwright-trace';
+  
   btn.disabled = true;
   statusEl.textContent = 'Checking for updates and launching... (This may take a minute on first run)';
   try {
-    const result = await window.api.launchRecorder();
+    const result = await window.api.launchRecorder(mode);
     if (result === 'success') {
       statusEl.textContent = 'Browser closed. Telemetry saved.';
       refreshFiles();

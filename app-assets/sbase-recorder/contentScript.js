@@ -1,3 +1,4 @@
+(function() {
 var cssPathById = function(el) {
     if (!(el instanceof Element)) return;
     var path = [];
@@ -792,3 +793,4 @@ document.body.addEventListener('keyup', function (event) {
     saveRecordedActions();
 });
 set_border('#F43344');
+})();

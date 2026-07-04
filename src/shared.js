@@ -245,11 +245,9 @@ export function extractPreviewLaunchParams(urlString) {
 }
 
 function getHelperFragmentValue(rawHash) {
-  if (!rawHash || !rawHash.includes('=')) return '';
-  const params = new URLSearchParams(rawHash);
-  return String(
-    params.get(HELPER_PAYLOAD_FRAGMENT_PARAM) || '',
-  ).trim();
+  if (!rawHash || !rawHash.includes(HELPER_PAYLOAD_FRAGMENT_PARAM + '=')) return '';
+  const match = rawHash.match(new RegExp(`(?:[?&#]|\\b)${HELPER_PAYLOAD_FRAGMENT_PARAM}=([^&]+)`));
+  return match ? match[1].trim() : '';
 }
 
 export function hasHelperConfigFragment(urlString) {
@@ -284,10 +282,12 @@ export function stripPreviewLaunchParams(urlString) {
     url.searchParams.delete(PREVIEW_TOKEN_PARAM);
     url.searchParams.delete(PREVIEW_API_PARAM);
     const rawHash = String(url.hash || '').replace(/^#/, '').trim();
-    if (rawHash && rawHash.includes('=')) {
-      const params = new URLSearchParams(rawHash);
-      params.delete(HELPER_PAYLOAD_FRAGMENT_PARAM);
-      const nextHash = params.toString();
+    if (rawHash && rawHash.includes(HELPER_PAYLOAD_FRAGMENT_PARAM + '=')) {
+      const regex = new RegExp(`([?&]?)${HELPER_PAYLOAD_FRAGMENT_PARAM}=[^&]*(&?)`);
+      let nextHash = rawHash.replace(regex, (match, prefix, suffix) => {
+        return (prefix && suffix) ? prefix : '';
+      });
+      if (nextHash.startsWith('&')) nextHash = nextHash.slice(1);
       url.hash = nextHash ? nextHash : '';
     }
     return url.toString();

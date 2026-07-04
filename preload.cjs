@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  launchRecorder: () => ipcRenderer.invoke('launch-recorder'),
+  launchRecorder: (mode) => ipcRenderer.invoke('launch-recorder', mode),
   listRecords: () => ipcRenderer.invoke('list-records'),
   readRecord: (filePath) => ipcRenderer.invoke('read-record', filePath)
 });

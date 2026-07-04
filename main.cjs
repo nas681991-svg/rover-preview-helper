@@ -1,17 +1,13 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-const { chromium } = require('playwright-extra');
-const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { chromium } = require('playwright-core');
 const fs = require('fs');
 const AdmZip = require('adm-zip');
 const isWin = process.platform === 'win32';
 
-chromium.use(stealthPlugin());
-
 const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
 const bugbugDir = path.join(extDataDir, 'bugbug');
 const sbaseExtDir = path.join(extDataDir, 'sbase-recorder');
-const tlRecorderDir = path.join(extDataDir, 'tl-recorder');
 
 const EXTENSION_SOURCES = [
   {
@@ -27,15 +23,29 @@ const EXTENSION_SOURCES = [
     destZip: () => path.join(extDataDir, 'recorder.zip'),
     extractDir: sbaseExtDir,
     isCrx: false,
-  },
-  {
-    name: 'Testing Library Recorder',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Dngnajohkpnidkckedcjmkmkndkpgffij%26uc',
-    destZip: () => path.join(extDataDir, 'tl-recorder.crx'),
-    extractDir: tlRecorderDir,
-    isCrx: true,
-  },
+  }
 ];
+
+/**
+ * Pre-seed Chrome Preferences into the user-data-dir so that the browser
+ * launches with Developer Mode enabled for extensions.
+ * Only writes if the Preferences file does not yet exist (avoids clobbering
+ * an established profile where the user may have customised settings).
+ */
+function preseedChromePreferences(userDataDir) {
+  const defaultDir = path.join(userDataDir, 'Default');
+  const prefsPath = path.join(defaultDir, 'Preferences');
+  if (fs.existsSync(prefsPath)) return;
+
+  const prefs = {
+    extensions: {
+      ui: { developer_mode: true }
+    }
+  };
+
+  fs.mkdirSync(defaultDir, { recursive: true });
+  fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
+}
 
 const assetsDir = path.join(process.resourcesPath, 'app-assets');
 const localAssetsDir = path.join(__dirname, 'app-assets');
@@ -83,11 +93,17 @@ async function downloadExtensionUpdate(url, destZip, extractDir, isCrx = false) 
   }
 }
 
-ipcMain.handle('launch-recorder', async () => {
+ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
   try {
     fs.mkdirSync(extDataDir, { recursive: true });
     
-    for (const ext of EXTENSION_SOURCES) {
+    // Determine which extensions to update and load based on mode
+    let targetSources = [];
+    if (mode === 'bugbug') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'Bugbug')];
+    else if (mode === 'seleniumbase') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'SeleniumBase')];
+    // 'rover' and 'playwright-trace' don't need external downloads
+
+    for (const ext of targetSources) {
       try {
         await downloadExtensionUpdate(ext.url, ext.destZip(), ext.extractDir, ext.isCrx);
       } catch (e) {
@@ -95,15 +111,22 @@ ipcMain.handle('launch-recorder', async () => {
       }
     }
 
-    const extensions = [roverExtDir];
-    for (const ext of EXTENSION_SOURCES) {
-      if (fs.existsSync(ext.extractDir)) extensions.push(ext.extractDir);
+    let extensions = [];
+    if (mode === 'rover') {
+      extensions = [roverExtDir];
+    } else if (mode === 'bugbug') {
+      if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
+    } else if (mode === 'seleniumbase') {
+      if (fs.existsSync(sbaseExtDir)) extensions.push(sbaseExtDir);
     }
     const extensionsStr = extensions.join(',');
     
     const userDataDir = path.join(app.getPath('userData'), 'browser-data');
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
     fs.mkdirSync(myRecordsPath, { recursive: true });
+
+    // Pre-seed Chrome profile so extensions launch with Developer Mode on.
+    preseedChromePreferences(userDataDir);
 
     let context = null;
     let launchError = null;
@@ -116,10 +139,14 @@ ipcMain.handle('launch-recorder', async () => {
           channel: channel, 
           acceptDownloads: true,
           downloadsPath: myRecordsPath,
+          ignoreDefaultArgs: ['--enable-automation'],
           args: [
-            `--disable-extensions-except=${extensionsStr}`,
-            `--load-extension=${extensionsStr}`,
-            '--disable-blink-features=AutomationControlled'
+            ...(extensionsStr ? [`--disable-extensions-except=${extensionsStr}`, `--load-extension=${extensionsStr}`] : []),
+            '--disable-blink-features=AutomationControlled',
+            '--enable-extensions',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-infobars',
           ]
         });
         break; // successfully launched
@@ -170,12 +197,16 @@ ipcMain.handle('launch-recorder', async () => {
     context.on('close', () => void stopTracing());
 
     const page1 = context.pages()[0] || await context.newPage();
-    await page1.goto('https://app.bugbug.io/sign-in/');
-    const page2 = await context.newPage();
-    await page2.goto('https://rover.rtrvr.ai/login');
-    const page3 = await context.newPage();
-    await page3.goto('https://google.com'); 
-    await page3.bringToFront();
+    
+    if (mode === 'bugbug') {
+      await page1.goto('https://app.bugbug.io/sign-in/');
+    } else if (mode === 'rover') {
+      await page1.goto('https://rover.rtrvr.ai/login');
+    } else {
+      await page1.goto('https://google.com'); 
+    }
+    
+    await page1.bringToFront();
 
     // Wait for the browser to be closed by the user before reporting success.
     await new Promise(resolve => context.on('close', resolve));

@@ -1,22 +1,22 @@
 {
   "source": "https://rover.rtrvr.ai",
-  "fetchedAt": "2026-07-01T05:12:04.302Z",
+  "fetchedAt": "2026-07-02T18:45:02.158Z",
   "files": [
     {
       "name": "embed",
       "file": "rover-embed.js",
       "url": "https://rover.rtrvr.ai/embed-core.js",
-      "bytes": 1259967,
-      "etag": "W/\"a5867042979294634791cdef900347cb\"",
-      "lastModified": "Wed, 01 Jul 2026 02:46:22 GMT"
+      "bytes": 1257641,
+      "etag": "W/\"3835412602d1497adef98c5c0c5101aa\"",
+      "lastModified": "Thu, 02 Jul 2026 04:57:45 GMT"
     },
     {
       "name": "worker",
       "file": "worker.js",
       "url": "https://rover.rtrvr.ai/worker/worker.js",
-      "bytes": 316024,
-      "etag": "W/\"a4b1d6982c25998e6572142fe6585907\"",
-      "lastModified": "Wed, 01 Jul 2026 02:46:23 GMT"
+      "bytes": 316494,
+      "etag": "W/\"c518c9bda17563793cfa21364a451b37\"",
+      "lastModified": "Thu, 02 Jul 2026 04:57:46 GMT"
     }
   ]
 }
