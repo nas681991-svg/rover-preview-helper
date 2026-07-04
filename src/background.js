@@ -11,14 +11,26 @@ import {
   stripPreviewLaunchParams,
 } from './shared.js';
 import { enableCspBypass, disableCspBypass, cleanupOrphanedRules } from './csp-bypass.js';
+import { logDiagnostic } from './diagnostics.js';
 
+// Clean up stale CSP rules from previous sessions on every SW start.
 cleanupOrphanedRules();
 
+// Also run cleanup on browser startup (handles SW restarts mid-session).
+chrome.runtime.onStartup.addListener(() => {
+  cleanupOrphanedRules();
+});
+
+// ── Ephemeral in-memory caches ──────────────────────────────────────────────
+// These Maps are HOT CACHES ONLY. MV3 service workers are killed after ~30s
+// of inactivity, wiping all in-memory state. None of these Maps are
+// correctness gates — they are performance optimizations. The system must
+// function correctly even when they start empty after a worker restart.
 const MAX_IN_MEMORY_STATES = 50;
 const inMemoryState = new Map();
-const pendingInjects = new Map();
-const refreshPromises = new Map();
-const pendingHydrations = new Map();
+const pendingInjects = new Map();     // dedup guard (optimization, not correctness)
+const refreshPromises = new Map();    // inflight coalescing (safe to lose)
+const pendingHydrations = new Map(); // dedup guard (safe to lose)
 const PERSISTED_CONFIG_KEY = 'rover-preview-helper:last-config';
 
 async function persistConfig(config) {
@@ -105,8 +117,9 @@ async function sanitizeTabUrl(tabId, url) {
       },
       args: [cleanUrl],
     });
-  } catch {
+  } catch (e) {
     // If this fails, the preview still works; the params just remain visible.
+    void logDiagnostic('warn', 'sanitize-url', e);
   }
 }
 
@@ -303,6 +316,10 @@ async function injectMainWorldState(tabId, state) {
   if (!state) return false;
   const signature = `${state.siteId}:${state.publicKey || ''}:${state.sessionToken || ''}:${state.launchUrl || state.requestId || ''}:${state.attachToken || ''}`;
   const existing = pendingInjects.get(tabId);
+  // Dedup optimization: skip re-injection if the same config is already being
+  // applied. This guard is ephemeral — after a SW restart pendingInjects is
+  // empty and we safely re-inject (idempotent: rover('boot') is safe to call
+  // multiple times with the same config).
   if (existing === signature) return true;
   pendingInjects.set(tabId, signature);
 
@@ -468,6 +485,7 @@ async function applyStateToTab(tabId, state) {
     return await injectMainWorldState(tabId, state);
   } catch (error) {
     console.error(`Failed to apply state to tab ${tabId}:`, error);
+    void logDiagnostic('error', 'apply-state', error);
     return false;
   }
 }
@@ -613,11 +631,16 @@ async function handleNavigation(tabId, url) {
     if (hydrated) return;
   } catch (e) {
     console.warn('maybeHydratePreviewFromUrl failed:', e);
+    void logDiagnostic('warn', 'hydrate-preview', e);
   }
+  // Defensive: always read from storage (in-memory Map may be empty after SW restart).
   const state = await readState(tabId);
   if (!state) return;
   if (!canReinjectStateOnUrl(state, url)) return;
-  const refreshed = await refreshStateFromBackend(tabId, state, url).catch(() => state);
+  const refreshed = await refreshStateFromBackend(tabId, state, url).catch((e) => {
+    void logDiagnostic('warn', 'nav-refresh', e);
+    return state;
+  });
   await applyStateToTab(tabId, refreshed || state);
 }
 
@@ -637,4 +660,37 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(details => {
 chrome.webNavigation.onCompleted.addListener(details => {
   if (details.frameId !== 0) return;
   void handleNavigation(details.tabId, details.url || '');
+});
+
+// ── Improvement #3: Proactive token refresh via chrome.alarms ─────────────
+// Tokens only refresh on navigation events. If a user stays on one page for
+// minutes, the session token can expire silently. This alarm proactively
+// checks all active tab states and refreshes any expiring tokens.
+const TOKEN_REFRESH_ALARM = 'rover-token-refresh';
+
+try {
+  chrome.alarms.create(TOKEN_REFRESH_ALARM, { periodInMinutes: 1 });
+} catch {
+  // alarms permission may not be available in all environments
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== TOKEN_REFRESH_ALARM) return;
+  try {
+    const allKeys = await chrome.storage.session.get(null);
+    for (const [key, state] of Object.entries(allKeys)) {
+      if (!key.startsWith(STORAGE_KEY_PREFIX)) continue;
+      if (!state || typeof state !== 'object') continue;
+      if (!shouldRefreshState(state)) continue;
+      const tabId = Number(key.replace(STORAGE_KEY_PREFIX, ''));
+      if (!Number.isFinite(tabId)) continue;
+      try {
+        await refreshStateFromBackend(tabId, state, state.targetUrl || '');
+      } catch (e) {
+        void logDiagnostic('warn', 'alarm-refresh', e);
+      }
+    }
+  } catch (e) {
+    void logDiagnostic('error', 'alarm-handler', e);
+  }
 });

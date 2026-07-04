@@ -43,6 +43,7 @@
     "record:all": "node scripts/multi-recorder.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "adm-zip": "^0.5.18",
     "playwright-core": "^1.61.1"
   },

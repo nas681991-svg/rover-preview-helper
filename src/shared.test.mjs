@@ -8,6 +8,7 @@ import {
   isHostAllowed,
   normalizeConfig,
   stripPreviewLaunchParams,
+  validateConfigInput,
 } from './shared.js';
 
 test('normalizeConfig keeps Workspace publicKey config fields', () => {
@@ -167,4 +168,46 @@ test('invalid helper fragments throw a clear error', () => {
     () => extractHelperConfigFragment('https://www.example.com/#rover_helper_payload=not-valid-base64'),
     /Invalid Rover helper handoff:/,
   );
+});
+
+// validateConfigInput tests
+
+test('validateConfigInput returns empty array for valid config', () => {
+  const issues = validateConfigInput({
+    siteId: 'site_123',
+    publicKey: 'pk_site_123',
+    allowedDomains: ['*'],
+  });
+  assert.deepStrictEqual(issues, []);
+});
+
+test('validateConfigInput reports missing siteId and auth', () => {
+  const issues = validateConfigInput({});
+  assert.ok(issues.length >= 2);
+  assert.ok(issues.some(i => i.level === 'error' && i.message.includes('siteId')));
+  assert.ok(issues.some(i => i.level === 'error' && i.message.includes('publicKey')));
+});
+
+test('validateConfigInput warns on unusual token formats', () => {
+  const issues = validateConfigInput({
+    siteId: 'site_123',
+    publicKey: 'not_a_pk',
+    sessionToken: 'bad_token',
+  });
+  assert.ok(issues.some(i => i.level === 'warning' && i.message.includes('pk_')));
+  assert.ok(issues.some(i => i.level === 'warning' && i.message.includes('sessionToken')));
+});
+
+test('validateConfigInput accepts sessionToken-only auth', () => {
+  const issues = validateConfigInput({
+    siteId: 'site_123',
+    sessionToken: 'rvrsess_abc123',
+  });
+  assert.deepStrictEqual(issues, []);
+});
+
+test('validateConfigInput rejects non-object input', () => {
+  assert.ok(validateConfigInput(null).length > 0);
+  assert.ok(validateConfigInput([]).length > 0);
+  assert.ok(validateConfigInput('string').length > 0);
 });

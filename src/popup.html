@@ -38,6 +38,8 @@ or
 
       <p class="hint">This editor is your saved reusable config. It stays the same across tabs. Tab-specific Rover runtime state is shown separately above.</p>
 
+      <div id="config-validation" class="validation-indicator" style="display:none;"></div>
+
       <div id="config-help" class="help-section" style="display:none;">
         <p class="help-text">No config saved yet. Get one from:</p>
         <div class="help-links">
@@ -54,6 +56,17 @@ or
       </div>
 
       <p id="status" class="status" aria-live="polite" role="status">Idle.</p>
+
+      <details id="sessions-panel" class="sessions-panel" style="display:none;">
+        <summary class="sessions-header">Active Sessions (<span id="sessions-count">0</span>)</summary>
+        <div id="sessions-list" class="sessions-list"></div>
+      </details>
+
+      <details id="diagnostics-panel" class="diagnostics-panel" style="display:none;">
+        <summary class="diagnostics-header">Diagnostics (<span id="diag-count">0</span>)</summary>
+        <div id="diagnostics-list" class="diagnostics-list"></div>
+        <button id="diag-clear" class="diag-clear">Clear</button>
+      </details>
     </main>
     <script type="module" src="./popup.js"></script>
   </body>
