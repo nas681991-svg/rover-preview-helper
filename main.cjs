@@ -189,6 +189,14 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       return globalSBaseState;
     });
 
+    await context.route('https://rover.internal/sbase-state', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(globalSBaseState)
+      });
+    });
+
     await context.addInitScript(() => {
       setInterval(() => {
         try {

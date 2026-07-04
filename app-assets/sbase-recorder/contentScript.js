@@ -1,4 +1,33 @@
 (function() {
+let memoryStorage = {};
+try {
+  const req = new XMLHttpRequest();
+  req.open('GET', 'https://rover.internal/sbase-state', false);
+  req.send(null);
+  if (req.status === 200) {
+    memoryStorage = JSON.parse(req.responseText);
+  }
+} catch (e) {}
+
+const SYNC_KEYS = ['recorded_actions', 'recorder_mode', 'pause_recorder', 'recorder_title', 'recorder_activated'];
+const origSetItem = window.sessionStorage.setItem;
+const origGetItem = window.sessionStorage.getItem;
+
+window.sessionStorage.setItem = function(key, value) {
+    if (SYNC_KEYS.includes(key)) {
+        memoryStorage[key] = value;
+        if (window.syncSBaseState) window.syncSBaseState({ [key]: value }).catch(()=>{});
+    }
+    return origSetItem.call(this, key, value);
+};
+
+window.sessionStorage.getItem = function(key) {
+    if (SYNC_KEYS.includes(key) && memoryStorage[key] !== undefined) {
+        return memoryStorage[key];
+    }
+    return origGetItem.call(this, key);
+};
+
 var cssPathById = function(el) {
     if (!(el instanceof Element)) return;
     var path = [];
