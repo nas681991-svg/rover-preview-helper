@@ -253,7 +253,11 @@ async function renderSessions() {
 
     for (const s of sessions) {
       const tab = tabMap[s.tabId];
-      const displayHost = s.host || (tab?.url ? new URL(tab.url).hostname : `Tab ${s.tabId}`);
+      let displayHost = s.host;
+      if (!displayHost && tab?.url) {
+        try { displayHost = new URL(tab.url).hostname; } catch { displayHost = ''; }
+      }
+      if (!displayHost) displayHost = `Tab ${s.tabId}`;
 
       const row = document.createElement('div');
       row.className = 'session-row';
@@ -273,11 +277,12 @@ async function renderSessions() {
         chrome.tabs.update(s.tabId, { active: true }).catch(() => {});
       });
 
-      // Disconnect button
+      // Disconnect button — clears state (does NOT reconnect)
       row.querySelector('.session-disconnect').addEventListener('click', async (e) => {
         e.stopPropagation();
-        await chrome.storage.session.remove(key_for(s.tabId));
-        await chrome.runtime.sendMessage({ type: 'ROVER_PREVIEW_HELPER_RECONNECT', tabId: s.tabId }).catch(() => {});
+        await chrome.storage.session.remove(key_for(s.tabId)).catch(() => {});
+        // Also remove the status key and tell the background to clean up CSP
+        await chrome.storage.session.remove(`${STATUS_KEY_PREFIX}${s.tabId}`).catch(() => {});
         renderSessions();
       });
 

@@ -537,7 +537,8 @@ async function reconnectTab(tabId) {
   let refreshed = state;
   try {
     refreshed = await refreshStateFromBackend(tabId, state, state.targetUrl || '', { force: true }) || state;
-  } catch {
+  } catch (e) {
+    void logDiagnostic('warn', 'reconnect-refresh', e);
     refreshed = state;
   }
   return await applyStateToTab(tabId, refreshed);
@@ -559,8 +560,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try {
           const hydrated = await maybeHydratePreviewFromUrl(tabId, pageUrl);
           if (hydrated) return;
-        } catch {
+        } catch (e) {
           // Fall through to stored-state reconnect.
+          void logDiagnostic('warn', 'page-ready-hydrate', e);
         }
         try {
           const hydrated = await maybeHydrateGenericConfigFromUrl(tabId, pageUrl);
@@ -579,8 +581,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (injected) {
           await writeStatus(tabId, `Rover reconnected for ${buildTargetHost(pageUrl, refreshed || state) || 'this tab'}.`);
         }
-      } catch {
+      } catch (e) {
         // Ignore readiness races; tab navigation hooks will retry.
+        void logDiagnostic('info', 'page-ready-race', e);
       }
     })();
     return;
@@ -668,29 +671,31 @@ chrome.webNavigation.onCompleted.addListener(details => {
 // checks all active tab states and refreshes any expiring tokens.
 const TOKEN_REFRESH_ALARM = 'rover-token-refresh';
 
-try {
-  chrome.alarms.create(TOKEN_REFRESH_ALARM, { periodInMinutes: 1 });
-} catch {
-  // alarms permission may not be available in all environments
-}
-
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== TOKEN_REFRESH_ALARM) return;
+if (typeof chrome !== 'undefined' && chrome.alarms) {
   try {
-    const allKeys = await chrome.storage.session.get(null);
-    for (const [key, state] of Object.entries(allKeys)) {
-      if (!key.startsWith(STORAGE_KEY_PREFIX)) continue;
-      if (!state || typeof state !== 'object') continue;
-      if (!shouldRefreshState(state)) continue;
-      const tabId = Number(key.replace(STORAGE_KEY_PREFIX, ''));
-      if (!Number.isFinite(tabId)) continue;
-      try {
-        await refreshStateFromBackend(tabId, state, state.targetUrl || '');
-      } catch (e) {
-        void logDiagnostic('warn', 'alarm-refresh', e);
-      }
-    }
-  } catch (e) {
-    void logDiagnostic('error', 'alarm-handler', e);
+    chrome.alarms.create(TOKEN_REFRESH_ALARM, { periodInMinutes: 1 });
+  } catch {
+    // alarms.create may fail in constrained environments
   }
-});
+
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== TOKEN_REFRESH_ALARM) return;
+    try {
+      const allKeys = await chrome.storage.session.get(null);
+      for (const [key, state] of Object.entries(allKeys)) {
+        if (!key.startsWith(STORAGE_KEY_PREFIX)) continue;
+        if (!state || typeof state !== 'object') continue;
+        if (!shouldRefreshState(state)) continue;
+        const tabId = Number(key.replace(STORAGE_KEY_PREFIX, ''));
+        if (!Number.isFinite(tabId)) continue;
+        try {
+          await refreshStateFromBackend(tabId, state, state.targetUrl || '');
+        } catch (e) {
+          void logDiagnostic('warn', 'alarm-refresh', e);
+        }
+      }
+    } catch (e) {
+      void logDiagnostic('error', 'alarm-handler', e);
+    }
+  });
+}
