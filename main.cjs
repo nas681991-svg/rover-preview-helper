@@ -63,10 +63,10 @@ async function downloadExtensionUpdate(url, destZip, extractDir, isCrx = false) 
         if (version === 2) {
           const publicKeyLength = zipBuffer.readUInt32LE(8);
           const signatureLength = zipBuffer.readUInt32LE(12);
-          zipBuffer = zipBuffer.slice(16 + publicKeyLength + signatureLength);
+          zipBuffer = zipBuffer.subarray(16 + publicKeyLength + signatureLength);
         } else if (version === 3) {
           const headerSize = zipBuffer.readUInt32LE(8);
-          zipBuffer = zipBuffer.slice(12 + headerSize);
+          zipBuffer = zipBuffer.subarray(12 + headerSize);
         }
       }
     }
@@ -147,7 +147,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
         });
         break; // successfully launched
       } catch (err) {
-        launchError = err;
+        launchError = { message: `${channel}: ${err.message}`, original: err };
       }
     }
 

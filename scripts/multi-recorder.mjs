@@ -21,35 +21,41 @@ async function downloadBugbug() {
   await mkdir(extensionsDir, { recursive: true });
   const crxUrl = 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc';
   
-  const response = await fetch(crxUrl);
-  if (!response.ok) throw new Error(`Failed to download Bugbug: ${response.statusText}`);
+  const controller = new AbortController();
+  const downloadTimeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(crxUrl, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Failed to download Bugbug: ${response.statusText}`);
   
-  const buffer = await response.arrayBuffer();
-  let crxBuffer = Buffer.from(buffer);
+    const buffer = await response.arrayBuffer();
+    let crxBuffer = Buffer.from(buffer);
 
-  // Strip CRX2/CRX3 headers to get the raw ZIP payload
-  const magic = crxBuffer.readUInt32LE(0);
-  if (magic === 0x34327243) { // 'Cr24'
-    const version = crxBuffer.readUInt32LE(4);
-    if (version === 2) {
-      const publicKeyLength = crxBuffer.readUInt32LE(8);
-      const signatureLength = crxBuffer.readUInt32LE(12);
-      crxBuffer = crxBuffer.slice(16 + publicKeyLength + signatureLength);
-    } else if (version === 3) {
-      const headerSize = crxBuffer.readUInt32LE(8);
-      crxBuffer = crxBuffer.slice(12 + headerSize);
-    } else {
-      throw new Error(`Unsupported CRX version: ${version}`);
+    // Strip CRX2/CRX3 headers to get the raw ZIP payload
+    const magic = crxBuffer.readUInt32LE(0);
+    if (magic === 0x34327243) { // 'Cr24'
+      const version = crxBuffer.readUInt32LE(4);
+      if (version === 2) {
+        const publicKeyLength = crxBuffer.readUInt32LE(8);
+        const signatureLength = crxBuffer.readUInt32LE(12);
+        crxBuffer = crxBuffer.subarray(16 + publicKeyLength + signatureLength);
+      } else if (version === 3) {
+        const headerSize = crxBuffer.readUInt32LE(8);
+        crxBuffer = crxBuffer.subarray(12 + headerSize);
+      } else {
+        throw new Error(`Unsupported CRX version: ${version}`);
+      }
     }
-  }
 
-  const zipPath = path.join(extensionsDir, 'bugbug.zip');
-  await writeFile(zipPath, crxBuffer);
+    const zipPath = path.join(extensionsDir, 'bugbug.zip');
+    await writeFile(zipPath, crxBuffer);
   
-  console.log('Extracting Bugbug extension...');
-  const zip = new AdmZip(zipPath);
-  zip.extractAllTo(bugbugDir, true);
-  console.log('Bugbug extension ready.');
+    console.log('Extracting Bugbug extension...');
+    const zip = new AdmZip(zipPath);
+    zip.extractAllTo(bugbugDir, true);
+    console.log('Bugbug extension ready.');
+  } finally {
+    clearTimeout(downloadTimeout);
+  }
 }
 
 

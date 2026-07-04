@@ -72,7 +72,7 @@ async function writeState(tabId, state) {
   inMemoryState.set(tabId, state);
   if (inMemoryState.size > MAX_IN_MEMORY_STATES) {
     const firstKey = inMemoryState.keys().next().value;
-    inMemoryState.delete(firstKey);
+    if (firstKey !== undefined) inMemoryState.delete(firstKey);
   }
   await setSessionValue(storageKey(tabId), state);
 }

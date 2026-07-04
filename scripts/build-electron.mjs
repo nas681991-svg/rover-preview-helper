@@ -35,10 +35,10 @@ async function downloadBugbug() {
       if (version === 2) {
         const publicKeyLength = crxBuffer.readUInt32LE(8);
         const signatureLength = crxBuffer.readUInt32LE(12);
-        crxBuffer = crxBuffer.slice(16 + publicKeyLength + signatureLength);
+        crxBuffer = crxBuffer.subarray(16 + publicKeyLength + signatureLength);
       } else if (version === 3) {
         const headerSize = crxBuffer.readUInt32LE(8);
-        crxBuffer = crxBuffer.slice(12 + headerSize);
+        crxBuffer = crxBuffer.subarray(12 + headerSize);
       } else {
         throw new Error(`Unsupported CRX version: ${version}`);
       }

@@ -15,11 +15,19 @@ test('buildCspRemovalRule removes both CSP headers scoped to the one tab', () =>
   assert.equal(rule.id, ruleIdForTab(7));
   assert.equal(rule.action.type, 'modifyHeaders');
 
-  const removed = rule.action.responseHeaders.map(h => `${h.header}:${h.operation}`).sort();
+  const headers = rule.action.responseHeaders;
+  assert.equal(headers.length, 2);
+
+  const removed = headers.map(h => `${h.header}:${h.operation}`).sort();
   assert.deepEqual(removed, [
     'content-security-policy-report-only:remove',
     'content-security-policy:remove',
   ]);
+
+  // Ensure no stale `value` keys are present — `remove` rules must not carry values.
+  for (const h of headers) {
+    assert.equal(h.value, undefined, `${h.header} should not have a value for remove operation`);
+  }
 
   assert.deepEqual(rule.condition.tabIds, [7]);
   assert.deepEqual(rule.condition.resourceTypes.sort(), ['main_frame', 'sub_frame']);
