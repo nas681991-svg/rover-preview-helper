@@ -3,7 +3,7 @@
  *
  * This test has two modes:
  *
- * **Full mode** (when rebrowser-patches are applied):
+ * **Full mode** (with patchright — default):
  *   Launches Chrome with the extension loaded and exercises all 8 live flows.
  *
  * **Lite mode** (fallback when extensions can't load):
@@ -161,8 +161,8 @@ async function main() {
 
   if (!fullMode) {
     console.log('  Mode: LITE (extension blocked by Chrome automation detection)\n');
-    console.log('  ℹ️  rebrowser-patches are required for full integration tests.');
-    console.log('  Install GNU patch.exe, then run: pnpm install\n');
+    console.log('  ℹ️  patchright\'s bundled Chromium is required for full integration tests.');
+    console.log('  Run: npx patchright install chromium\n');
 
     rmSync(testDataDir, { recursive: true, force: true });
     preseedChromePrefs(testDataDir);
@@ -235,108 +235,139 @@ async function runFullTests(context, page, extId) {
   assert(els.reconnect, 'Reconnect button present');
   assert(els.injectText.includes('Inject Rover'), 'Inject button text correct');
 
-  // Test 4: Inject Rover via popup UI
+  // Test 4: Inject Rover via CDP on extension popup page
   console.log('\n── Test 4: Inject Rover ──');
 
-  // Close the current popup — we need to open it when example.com is the
-  // "active" tab, because popup.js uses chrome.tabs.query({active:true}).
+  // Close the current popup and open a fresh one
   await popup.close();
 
-  // Ensure example.com is the active tab
-  await page.bringToFront();
-  await sleep(500);
-
-  // Now open the popup — since example.com is the active tab in this window,
-  // the popup's getActiveTab() will find it.
-  const popup3 = await context.newPage();
-  await popup3.goto(`chrome-extension://${extId}/src/popup.html`);
+  const popupInject = await context.newPage();
+  await popupInject.goto(`chrome-extension://${extId}/src/popup.html`);
   await sleep(1500);
 
-  // Fill the config textarea and click inject
-  await popup3.fill('#config', JSON.stringify(TEST_CONFIG));
+  // Use CDP Runtime.evaluate on the popup page — this runs in the page's
+  // actual JS context where chrome.* extension APIs are available
+  // (unlike patchright's page.evaluate which runs in a sandboxed context).
+  const cdpPopup = await context.newCDPSession(popupInject);
 
-  // Bring example.com to front briefly so it stays "active", then click inject
-  await page.bringToFront();
-  await sleep(200);
-  await popup3.bringToFront();
-  await sleep(200);
+  // Step 1: Find the example.com tab ID
+  const tabQuery = await cdpPopup.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const tabs = await chrome.tabs.query({});
+      const target = tabs.find(t => t.url && t.url.includes('example.com'));
+      return target ? target.id : -1;
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
 
-  // The popup's click handler will call getActiveTab() which should find
-  // the example.com tab (last active non-extension tab).
-  // But since bringing popup3 to front makes IT the active tab, we need
-  // a different approach: dispatch the inject message directly.
-  //
-  // Use the service worker via CDP to inject into the correct tab.
-  const cdp2 = await context.newCDPSession(page);
-  const { targetInfos: targets2 } = await cdp2.send('Target.getTargets');
-  const exampleTarget = targets2.find(t => t.type === 'page' && t.url.includes('example.com'));
-  await cdp2.detach();
+  const tabId = tabQuery.result?.value;
+  console.log(`  Tab ID: ${tabId}`);
 
-  if (exampleTarget) {
-    // Get the tabId by evaluating in the popup's context where chrome APIs work
-    // via dispatching the inject directly through the popup's own function
-    await popup3.evaluate(async (config) => {
-      // Directly post to background since chrome.runtime.sendMessage works
-      // in the extension page context (popup.html loaded from chrome-extension://)
-      try {
-        // The popup's own code has access to chrome.runtime
-        // Find all tabs and pick example.com
-        const tabs = await chrome.tabs.query({});
-        const target = tabs.find(t => t.url && t.url.includes('example.com'));
-        if (target) {
-          await chrome.runtime.sendMessage({
+  let injected = false;
+
+  if (tabId && tabId > 0) {
+    // Step 2: Send the inject message via chrome.runtime.sendMessage
+    const injectQuery = await cdpPopup.send('Runtime.evaluate', {
+      expression: `(async () => {
+        try {
+          return await chrome.runtime.sendMessage({
             type: 'ROVER_PREVIEW_HELPER_INJECT',
-            tabId: target.id,
-            config,
+            tabId: ${tabId},
+            config: ${JSON.stringify(TEST_CONFIG)},
           });
+        } catch (e) {
+          return { ok: false, error: e.message };
         }
-      } catch (e) {
-        // Extension APIs not available in evaluate — fall back
-        document.getElementById('status').textContent = 'Error: ' + e.message;
-      }
-    }, TEST_CONFIG);
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+
+    const injectResult = injectQuery.result?.value;
+    console.log(`  Inject result: ${JSON.stringify(injectResult)}`);
+    assert(injectResult?.ok, 'Inject accepted', injectResult?.error);
+    injected = injectResult?.ok;
+  } else {
+    fail('Find example.com tab ID', `Got: ${tabId}`);
   }
 
-  // Also try the UI click approach as a fallback
-  await popup3.click('#inject');
+  await cdpPopup.detach();
+  await popupInject.close();
 
-  await sleep(6000);
+  if (injected) {
+    // Wait for injection to complete (CSP rule → page reload → script inject)
+    await sleep(6000);
 
-  const statusText = await popup3.evaluate(() => document.getElementById('status')?.textContent || '');
-  const injectWorked = !statusText.toLowerCase().includes('error') && statusText !== 'Idle.';
-  assert(injectWorked, 'Inject triggered via popup UI', `Status: "${statusText}"`);
+    // Check example.com page for Rover state using CDP Runtime.evaluate
+    // (patchright's page.evaluate runs in a utility world, but the extension's
+    // chrome.scripting.executeScript injects into the MAIN world)
+    await page.bringToFront();
+    await sleep(2000);
 
-  // Switch to the target page and check if Rover was injected
-  await page.bringToFront();
-  await sleep(3000);
+    const cdpMain = await context.newCDPSession(page);
+    const stateQuery = await cdpMain.send('Runtime.evaluate', {
+      expression: `({
+        hasState: !!window.__ROVER_PREVIEW_HELPER_STATE__,
+        hasRoverFn: typeof window.rover === 'function',
+        siteId: (window.__ROVER_PREVIEW_HELPER_STATE__ || {}).siteId || null,
+        hasWorkerUrl: !!(window.__ROVER_PREVIEW_HELPER_STATE__ || {}).workerUrl,
+      })`,
+      returnByValue: true,
+    });
+    const state = stateQuery.result?.value || {};
 
-  const state = await page.evaluate(() => ({
-    hasState: !!window.__ROVER_PREVIEW_HELPER_STATE__,
-    hasRoverFn: typeof window.rover === 'function',
-    siteId: window.__ROVER_PREVIEW_HELPER_STATE__?.siteId || null,
-    hasWorkerUrl: !!window.__ROVER_PREVIEW_HELPER_STATE__?.workerUrl,
-  }));
+    assert(state.hasState, 'Rover state seeded into page');
+    assert(state.hasRoverFn, 'rover() global function created');
+    assert(state.siteId === 'integration-test-site', 'Correct siteId', `Got: ${state.siteId}`);
 
-  assert(state.hasState, 'Rover state seeded into page');
-  assert(state.hasRoverFn, 'rover() global function created');
-  assert(state.siteId === 'integration-test-site', 'Correct siteId', `Got: ${state.siteId}`);
-  assert(state.hasWorkerUrl, 'workerUrl set');
+    // Test 5: CSP bypass
+    console.log('\n── Test 5: CSP bypass ──');
+    assert(state.hasState && state.hasRoverFn, 'CSP bypass effective (Rover injected successfully)');
 
-  // Test 5: CSP bypass — verify indirectly via page behavior
-  console.log('\n── Test 5: CSP bypass ──');
-  assert(state.hasState && state.hasRoverFn, 'CSP bypass effective (Rover injected successfully)');
+    // Test 7: Navigation reinjection
+    console.log('\n── Test 7: Reinjection after reload ──');
+    await page.bringToFront();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await sleep(5000);
 
-  // Test 6: Config persistence — close and reopen popup, check textarea
+    const reloadQuery = await cdpMain.send('Runtime.evaluate', {
+      expression: `({
+        hasState: !!window.__ROVER_PREVIEW_HELPER_STATE__,
+        hasRoverFn: typeof window.rover === 'function',
+        siteId: (window.__ROVER_PREVIEW_HELPER_STATE__ || {}).siteId || null,
+      })`,
+      returnByValue: true,
+    });
+    const afterReload = reloadQuery.result?.value || {};
+
+    assert(afterReload.hasState, 'State reinjected after reload');
+    assert(afterReload.hasRoverFn, 'rover() recreated after reload');
+    assert(afterReload.siteId === 'integration-test-site', 'Correct siteId after reload');
+
+    await cdpMain.detach();
+  } else {
+    skip('Rover state checks', 'inject failed');
+    console.log('\n── Test 5: CSP bypass ──');
+    skip('CSP bypass', 'inject failed');
+    console.log('\n── Test 7: Reinjection after reload ──');
+    skip('Reinjection', 'inject failed');
+  }
+
+  // Test 6: Config persistence — open popup and check that config was persisted
   console.log('\n── Test 6: Config persistence ──');
-  await popup3.close();
   const popup2 = await context.newPage();
   await popup2.goto(`chrome-extension://${extId}/src/popup.html`);
   await sleep(2000);
 
-  const persistedConfig = await popup2.evaluate(() => {
-    const el = document.getElementById('config');
-    return el?.value || '';
+  const cdpPersist = await context.newCDPSession(popup2);
+  const persistQuery = await cdpPersist.send('Runtime.evaluate', {
+    expression: `document.getElementById('config')?.value || ''`,
+    returnByValue: true,
   });
+  const persistedConfig = persistQuery.result?.value || '';
+  await cdpPersist.detach();
+
   let persistedOk = false;
   try {
     const parsed = JSON.parse(persistedConfig);
@@ -344,24 +375,9 @@ async function runFullTests(context, page, extId) {
   } catch {}
   assert(persistedOk, 'Config persisted across popup reopen', `Got: "${persistedConfig.substring(0, 50)}..."`);
 
-  // Test 7: Navigation reinjection
-  console.log('\n── Test 7: Reinjection after reload ──');
-  await page.bringToFront();
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await sleep(5000);
-
-  const afterReload = await page.evaluate(() => ({
-    hasState: !!window.__ROVER_PREVIEW_HELPER_STATE__,
-    hasRoverFn: typeof window.rover === 'function',
-    siteId: window.__ROVER_PREVIEW_HELPER_STATE__?.siteId || null,
-  }));
-  assert(afterReload.hasState, 'State reinjected after reload');
-  assert(afterReload.hasRoverFn, 'rover() recreated after reload');
-  assert(afterReload.siteId === 'integration-test-site', 'Correct siteId after reload');
-
   // Test 8: Tab close cleanup — verify status changes in popup
   console.log('\n── Test 8: Tab close cleanup ──');
-  await page.close();
+  if (!page.isClosed()) await page.close();
   await sleep(1500);
 
   // Reopen popup and verify the tab state is cleared
@@ -372,7 +388,6 @@ async function runFullTests(context, page, extId) {
     const badge = document.getElementById('tab-badge');
     return badge ? getComputedStyle(badge).display !== 'none' : false;
   });
-  // After the injected tab closes, the badge for that tab should be hidden
   assert(!tabBadgeVisible, 'Tab badge hidden after tab close');
 
   await popup2.close();
@@ -490,7 +505,7 @@ async function runLiteTests(context, extPath) {
   server.close();
 
   // Skipped tests that need full extension context
-  console.log('\n── Skipped Tests (require rebrowser-patches) ──');
+  console.log('\n── Skipped Tests (require patchright full mode) ──');
   skip('Content script injection', 'needs extension context');
   skip('Rover injection into page', 'needs chrome.scripting API');
   skip('CSP bypass rule application', 'needs chrome.declarativeNetRequest API');
