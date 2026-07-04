@@ -29,6 +29,7 @@
     ]
   },
   "scripts": {
+    "postinstall": "npx rebrowser-patches",
     "start": "electron .",
     "package:app": "node scripts/build-electron.mjs",
     "build": "node scripts/build.mjs",

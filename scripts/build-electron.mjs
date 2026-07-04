@@ -56,26 +56,6 @@ async function downloadBugbug() {
   }
 }
 
-function extractSeleniumBaseRecorder() {
-  if (existsSync(sbaseExtDir)) {
-    console.log('SeleniumBase Recorder already extracted.');
-    return;
-  }
-  console.log('Extracting SeleniumBase recorder extension...');
-  try {
-    const output = execSync('python -c "import seleniumbase, os; print(os.path.join(os.path.dirname(seleniumbase.__file__), \'extensions\', \'recorder.zip\'))"', { encoding: 'utf-8' });
-    const zipPath = output.trim();
-    if (existsSync(zipPath)) {
-      const zip = new AdmZip(zipPath);
-      zip.extractAllTo(sbaseExtDir, true);
-      console.log('SeleniumBase Recorder extension ready.');
-    } else {
-      console.warn('Could not find SeleniumBase recorder.zip at:', zipPath);
-    }
-  } catch (err) {
-    console.warn('Failed to extract SeleniumBase recorder:', err.message);
-  }
-}
 
 async function main() {
   console.log('Cleaning app-assets...');
@@ -88,7 +68,6 @@ async function main() {
   await cp(path.join(root, 'dist'), roverExtDir, { recursive: true });
   
   await downloadBugbug();
-  extractSeleniumBaseRecorder();
   
   console.log('Building Electron app...');
   execSync('npx electron-builder', { stdio: 'inherit', cwd: root });

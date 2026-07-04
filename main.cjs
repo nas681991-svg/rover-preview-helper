@@ -7,7 +7,6 @@ const isWin = process.platform === 'win32';
 
 const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
 const bugbugDir = path.join(extDataDir, 'bugbug');
-const sbaseExtDir = path.join(extDataDir, 'sbase-recorder');
 
 const EXTENSION_SOURCES = [
   {
@@ -16,13 +15,6 @@ const EXTENSION_SOURCES = [
     destZip: () => path.join(extDataDir, 'bugbug.crx'),
     extractDir: bugbugDir,
     isCrx: true,
-  },
-  {
-    name: 'SeleniumBase',
-    url: 'https://github.com/seleniumbase/SeleniumBase/raw/master/seleniumbase/extensions/recorder.zip',
-    destZip: () => path.join(extDataDir, 'recorder.zip'),
-    extractDir: sbaseExtDir,
-    isCrx: false,
   }
 ];
 
@@ -51,6 +43,7 @@ const assetsDir = path.join(process.resourcesPath, 'app-assets');
 const localAssetsDir = path.join(__dirname, 'app-assets');
 const activeAssetsDir = fs.existsSync(assetsDir) ? assetsDir : localAssetsDir;
 const roverExtDir = path.join(activeAssetsDir, 'rover');
+const sbaseExtDir = path.join(activeAssetsDir, 'sbase-recorder');
 
 let mainWindow;
 
@@ -104,8 +97,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     // Determine which extensions to update and load based on mode
     let targetSources = [];
     if (mode === 'bugbug') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'Bugbug')];
-    else if (mode === 'seleniumbase') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'SeleniumBase')];
-    // 'rover' and 'playwright-trace' don't need external downloads
+    // 'rover', 'seleniumbase', and 'playwright-trace' don't need external downloads
 
     for (const ext of targetSources) {
       try {
@@ -163,16 +155,49 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       throw new Error(`Failed to launch browser. Please ensure Google Chrome or Microsoft Edge is installed on your system. Details: ${launchError?.message}`);
     }
     
-    // Start Native Playwright Tracing
+    // Start Native Playwright Tracing with Chunking
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    await context.tracing.startChunk({ title: 'Chunk 1' });
+    
+    let chunkCount = 1;
+    const chunkInterval = setInterval(async () => {
+      chunkCount++;
+      try {
+        const tracePath = path.join(myRecordsPath, `trace-${Date.now()}-part${chunkCount-1}.zip`);
+        await context.tracing.stopChunk({ path: tracePath });
+        await context.tracing.startChunk({ title: `Chunk ${chunkCount}` });
+      } catch (err) {
+        console.error('Failed to save trace chunk:', err);
+      }
+    }, 3 * 60 * 1000);
     
     let tracingStopped = false;
     const stopTracing = async () => {
       if (tracingStopped) return;
-      const tracePath = path.join(myRecordsPath, `trace-${Date.now()}.zip`);
+      clearInterval(chunkInterval);
+      const tracePath = path.join(myRecordsPath, `trace-${Date.now()}-part${chunkCount}.zip`);
       await context.tracing.stop({ path: tracePath });
       tracingStopped = true;
     };
+
+    // MV3 Keep-alive ping and SBase sync
+    let globalSBaseState = {};
+    await context.exposeBinding('syncSBaseState', async (source, state) => {
+      if (state) {
+        globalSBaseState = { ...globalSBaseState, ...state };
+      }
+      return globalSBaseState;
+    });
+
+    await context.addInitScript(() => {
+      setInterval(() => {
+        try {
+          if (window.chrome && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ping: true}).catch(() => {});
+          }
+        } catch (e) {}
+      }, 20000);
+    });
 
     // Use a counter to track open pages instead of context.pages().length
     // which is unreliable during close events.

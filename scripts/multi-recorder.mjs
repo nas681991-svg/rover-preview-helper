@@ -52,26 +52,6 @@ async function downloadBugbug() {
   console.log('Bugbug extension ready.');
 }
 
-function extractSeleniumBaseRecorder() {
-  if (existsSync(sbaseExtDir)) {
-    console.log('SeleniumBase Recorder already extracted.');
-    return;
-  }
-  console.log('Extracting SeleniumBase recorder extension...');
-  try {
-    const output = execSync('python -c "import seleniumbase, os; print(os.path.join(os.path.dirname(seleniumbase.__file__), \'extensions\', \'recorder.zip\'))"', { encoding: 'utf-8' });
-    const zipPath = output.trim();
-    if (existsSync(zipPath)) {
-      const zip = new AdmZip(zipPath);
-      zip.extractAllTo(sbaseExtDir, true);
-      console.log('SeleniumBase Recorder extension ready.');
-    } else {
-      console.warn('Could not find SeleniumBase recorder.zip at:', zipPath);
-    }
-  } catch (err) {
-    console.warn('Failed to extract SeleniumBase recorder:', err.message);
-  }
-}
 
 async function startPlaywright() {
   console.log('Launching browser with all extensions...');
@@ -84,7 +64,6 @@ async function main() {
   execSync('pnpm build', { stdio: 'inherit', cwd: root });
   
   await downloadBugbug();
-  extractSeleniumBaseRecorder();
   
   await startPlaywright();
 }
