@@ -32,13 +32,14 @@
     ]
   },
   "scripts": {
-    "postinstall": "npx rebrowser-patches patch --packageName playwright-core",
+    "postinstall": "npx patchright install chrome",
     "start": "electron .",
     "package:app": "node scripts/build-electron.mjs",
     "build": "node scripts/build.mjs",
     "clean": "node scripts/clean.mjs",
     "dev": "node scripts/build.mjs --watch",
     "test": "node --test src/*.test.mjs scripts/*.test.mjs",
+    "test:integration": "node scripts/integration-test.mjs",
     "record:all": "node scripts/multi-recorder.mjs"
   },
   "dependencies": {
@@ -49,7 +50,6 @@
     "@rtrvr-ai/cli": "^0.2.1",
     "electron": "43.0.0",
     "electron-builder": "^26.15.3",
-    "playwright": "^1.61.1",
-    "rebrowser-patches": "^1.0.19"
+    "patchright": "^1.61.1"
   }
 }
