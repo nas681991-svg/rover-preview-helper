@@ -93,7 +93,11 @@ async function downloadExtensionUpdate(url, destZip, extractDir, isCrx = false) 
   }
 }
 
+let launchInProgress = false;
+
 ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
+  if (launchInProgress) return 'Error: Recording session already in progress.';
+  launchInProgress = true;
   try {
     fs.mkdirSync(extDataDir, { recursive: true });
     
@@ -165,13 +169,9 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     let tracingStopped = false;
     const stopTracing = async () => {
       if (tracingStopped) return;
+      const tracePath = path.join(myRecordsPath, `trace-${Date.now()}.zip`);
+      await context.tracing.stop({ path: tracePath });
       tracingStopped = true;
-      try {
-        const tracePath = path.join(myRecordsPath, `trace-${Date.now()}.zip`);
-        await context.tracing.stop({ path: tracePath });
-      } catch (e) {
-        console.error('Failed to save trace:', e);
-      }
     };
 
     // Use a counter to track open pages instead of context.pages().length
@@ -215,6 +215,8 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
   } catch (error) {
     console.error(error);
     return error.message || 'Unknown error occurred launching Playwright';
+  } finally {
+    launchInProgress = false;
   }
 });
 
@@ -236,7 +238,7 @@ ipcMain.handle('list-records', async () => {
 ipcMain.handle('read-record', async (event, filePath) => {
   try {
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
-    const resolved = path.resolve(filePath);
+    const resolved = fs.realpathSync(path.resolve(filePath));
     const normalizedResolved = isWin ? resolved.toLowerCase() : resolved;
     const normalizedBase = isWin ? myRecordsPath.toLowerCase() : myRecordsPath;
     if (!normalizedResolved.startsWith(normalizedBase)) {
@@ -255,7 +257,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: true
     }
   });
   mainWindow.loadFile('index.html');

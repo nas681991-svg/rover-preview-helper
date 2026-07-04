@@ -32,8 +32,11 @@ export function buildCspRemovalRule(tabId) {
     action: {
       type: 'modifyHeaders',
       responseHeaders: [
-        { header: 'content-security-policy', operation: 'remove' },
-        { header: 'content-security-policy-report-only', operation: 'remove' },
+        { 
+          header: 'content-security-policy', 
+          operation: 'append', 
+          value: "connect-src 'self' https://*.rtrvr.ai wss://*.rtrvr.ai; worker-src 'self' blob: https://*.rtrvr.ai;" 
+        },
       ],
     },
     condition: {
