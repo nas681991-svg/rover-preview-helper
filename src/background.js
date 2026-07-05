@@ -12,6 +12,11 @@ import {
 } from './shared.js';
 import { enableCspBypass, disableCspBypass, cleanupOrphanedRules } from './csp-bypass.js';
 import { logDiagnostic } from './diagnostics.js';
+import {
+  saveFormMap, getFormMap, listFormMaps,
+  startReplay, pauseReplay, resumeReplay, cancelReplay, getReplayState,
+} from './form-recorder/replay-worker.js';
+import { extractFromPDF, extractFromMultiplePDFs } from './form-recorder/pdf-pipeline.js';
 
 // Clean up stale CSP rules from previous sessions on every SW start.
 cleanupOrphanedRules();
@@ -619,6 +624,136 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })().catch(error => {
       try { sendResponse({ ok: false, error: String(error?.message || error) }); } catch { /* port closed */ }
     });
+    return true;
+  }
+
+  // ── Form Recorder Messages ──────────────────────────────────────────────
+
+  if (message.type === 'FORM_RECORDER_START') {
+    const tabId = Number(message.tabId);
+    void (async () => {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: false },
+          world: 'ISOLATED',
+          files: ['src/form-recorder/recorder-bundle.js'],
+        });
+        const result = await chrome.tabs.sendMessage(tabId, { type: 'FORM_RECORDER_START' });
+        try { sendResponse({ ok: true, ...result }); } catch { /* port closed */ }
+      } catch (err) {
+        try { sendResponse({ ok: false, error: err.message }); } catch { /* port closed */ }
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FORM_RECORDER_STOP') {
+    const tabId = Number(message.tabId);
+    void (async () => {
+      try {
+        const result = await chrome.tabs.sendMessage(tabId, { type: 'FORM_RECORDER_STOP' });
+        // Auto-save the form map
+        if (result?.ok && result.fields) {
+          const tab = await chrome.tabs.get(tabId).catch(() => null);
+          const formMap = {
+            name: tab?.title || 'Recorded Form',
+            startUrl: result.startUrl || tab?.url || '',
+            recordedAt: Date.now(),
+            totalPages: result.totalPages || 1,
+            fields: result.fields,
+            navActions: result.navActions || [],
+          };
+          const id = await saveFormMap(formMap);
+          formMap.id = id;
+          try { sendResponse({ ok: true, formMap }); } catch { /* port closed */ }
+        } else {
+          try { sendResponse(result || { ok: false }); } catch { /* port closed */ }
+        }
+      } catch (err) {
+        try { sendResponse({ ok: false, error: err.message }); } catch { /* port closed */ }
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FORM_RECORDER_STATUS') {
+    const tabId = Number(message.tabId);
+    void (async () => {
+      try {
+        const result = await chrome.tabs.sendMessage(tabId, { type: 'FORM_RECORDER_STATUS' });
+        try { sendResponse(result || {}); } catch { /* port closed */ }
+      } catch {
+        try { sendResponse({ recording: false }); } catch { /* port closed */ }
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FORM_RECORDER_LIST_MAPS') {
+    void (async () => {
+      const maps = await listFormMaps();
+      try { sendResponse({ ok: true, maps }); } catch { /* port closed */ }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FORM_REPLAY_START') {
+    const tabId = Number(message.tabId);
+    void (async () => {
+      try {
+        const formMap = await getFormMap(message.formMapId);
+        if (!formMap) {
+          try { sendResponse({ ok: false, error: 'Form map not found' }); } catch { /* port closed */ }
+          return;
+        }
+        try { sendResponse({ ok: true, status: 'started' }); } catch { /* port closed */ }
+        // Run replay in the background (don't await — it's long-running)
+        startReplay(tabId, formMap, message.parsedCSV).catch(err => {
+          void logDiagnostic('error', 'replay', err);
+        });
+      } catch (err) {
+        try { sendResponse({ ok: false, error: err.message }); } catch { /* port closed */ }
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FORM_REPLAY_PAUSE') {
+    void pauseReplay();
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === 'FORM_REPLAY_RESUME') {
+    void resumeReplay();
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === 'FORM_REPLAY_CANCEL') {
+    void cancelReplay();
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === 'FORM_REPLAY_STATUS') {
+    void (async () => {
+      const state = await getReplayState();
+      try { sendResponse(state || { status: 'idle' }); } catch { /* port closed */ }
+    })();
+    return true;
+  }
+
+  if (message.type === 'FORM_RECORDER_PDF_EXTRACT') {
+    void (async () => {
+      try {
+        const pdfBuffer = Uint8Array.from(atob(message.pdfBase64), c => c.charCodeAt(0)).buffer;
+        const result = await extractFromPDF(pdfBuffer, message.csvColumns);
+        try { sendResponse({ ok: true, ...result }); } catch { /* port closed */ }
+      } catch (err) {
+        try { sendResponse({ ok: false, error: err.message }); } catch { /* port closed */ }
+      }
+    })();
     return true;
   }
 });

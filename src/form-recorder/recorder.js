@@ -1,0 +1,270 @@
+/**
+ * Form Recorder — content script that watches user interactions with form
+ * elements and builds a structured field map with selectors + coordinates.
+ *
+ * Injected into the ISOLATED world. Communicates with the background
+ * service worker via chrome.runtime messaging.
+ */
+import { captureField } from './selector-engine.js';
+
+const STORAGE_KEY = 'rover-form-recorder:fields';
+const NAV_STORAGE_KEY = 'rover-form-recorder:nav';
+const META_KEY = 'rover-form-recorder:meta';
+
+/** @type {Map<string, Object>} field key -> field descriptor */
+const fieldMap = new Map();
+
+/** @type {Array<Object>} ordered list of navigation actions (wizard pages) */
+const navActions = [];
+
+/** @type {number} current wizard page index */
+let currentPage = 0;
+
+/** @type {boolean} whether the recorder is active */
+let recording = false;
+
+/** @type {string} the URL where recording started */
+let startUrl = '';
+
+// ── Coordinate Tracking ─────────────────────────────────────────────────────
+// We track the last known mouse position so every field interaction
+// includes the exact screen coordinates the user clicked/focused.
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+function trackMouse(e) {
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+}
+
+// ── Field Key ────────────────────────────────────────────────────────────────
+// Generates a stable dedup key for a form element so we update (not duplicate)
+// fields when the user re-interacts with the same input.
+function fieldKey(el) {
+  if (el.id) return `id:${el.id}`;
+  if (el.name) return `name:${el.name}`;
+  const path = [];
+  let cur = el;
+  while (cur && cur !== document.body) {
+    const parent = cur.parentElement;
+    if (!parent) break;
+    const siblings = Array.from(parent.children).filter(c => c.tagName === cur.tagName);
+    const idx = siblings.indexOf(cur);
+    path.unshift(`${cur.tagName}[${idx}]`);
+    cur = parent;
+  }
+  return `path:${path.join('>')}`;
+}
+
+// ── Event Handlers ───────────────────────────────────────────────────────────
+
+function isFormField(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'input') {
+    const skip = ['hidden', 'submit', 'button', 'reset', 'image'];
+    return !skip.includes((el.type || '').toLowerCase());
+  }
+  return tag === 'select' || tag === 'textarea' ||
+         (el.contentEditable === 'true' && el.getAttribute('role') === 'textbox');
+}
+
+function handleFieldInteraction(e) {
+  if (!recording) return;
+  const el = e.target;
+  if (!isFormField(el)) return;
+
+  const value = el.tagName.toLowerCase() === 'select'
+    ? el.options[el.selectedIndex]?.text || el.value
+    : el.value;
+
+  const coords = { x: lastMouseX, y: lastMouseY };
+  const descriptor = captureField(el, value, coords);
+  descriptor.page = currentPage;
+
+  const key = fieldKey(el);
+  fieldMap.set(key, descriptor);
+
+  // Persist incrementally
+  void persistFields();
+}
+
+function handlePossibleNavigation(e) {
+  if (!recording) return;
+  const el = e.target?.closest?.('button, [type="submit"], a, [role="button"]');
+  if (!el) return;
+
+  const text = (el.textContent || '').trim().toLowerCase();
+  const navKeywords = ['next', 'continue', 'proceed', 'forward', 'step', 'submit', 'save'];
+  const isNavButton = navKeywords.some(kw => text.includes(kw)) ||
+                      el.type === 'submit';
+
+  if (!isNavButton) return;
+
+  // Capture the navigation action with coordinates
+  const rect = el.getBoundingClientRect();
+  navActions.push({
+    type: '__NAV__',
+    page: currentPage,
+    buttonText: (el.textContent || '').trim(),
+    selector: el.id ? `#${el.id}` : buildQuickSelector(el),
+    coords: {
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2),
+      pageX: Math.round(rect.left + window.scrollX + rect.width / 2),
+      pageY: Math.round(rect.top + window.scrollY + rect.height / 2),
+    },
+    timestamp: Date.now(),
+  });
+
+  currentPage++;
+  void persistFields();
+}
+
+function buildQuickSelector(el) {
+  if (el.id) return `#${el.id}`;
+  if (el.name) return `[name="${el.name}"]`;
+  const tag = el.tagName.toLowerCase();
+  const text = (el.textContent || '').trim().slice(0, 30);
+  if (text) return `${tag}:has-text("${text}")`;
+  return tag;
+}
+
+// ── DOM Mutation Observer ────────────────────────────────────────────────────
+// Watches for new form fields appearing (conditional logic, wizard pages).
+let mutationTimer = null;
+const observer = new MutationObserver(() => {
+  if (!recording) return;
+  clearTimeout(mutationTimer);
+  mutationTimer = setTimeout(() => {
+    // Auto-discover any new form fields that appeared
+    const fields = document.querySelectorAll('input, select, textarea, [contenteditable="true"][role="textbox"]');
+    fields.forEach(el => {
+      if (!isFormField(el)) return;
+      const key = fieldKey(el);
+      if (fieldMap.has(key)) return; // already captured
+      // Pre-capture with empty value (user hasn't interacted yet)
+      const descriptor = captureField(el, '', null);
+      descriptor.page = currentPage;
+      descriptor.autoDiscovered = true;
+      fieldMap.set(key, descriptor);
+    });
+    void persistFields();
+  }, 1500); // 1.5s debounce for DOM stability
+});
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+
+async function persistFields() {
+  const fields = Array.from(fieldMap.values());
+  try {
+    await chrome.storage.session.set({
+      [STORAGE_KEY]: fields,
+      [NAV_STORAGE_KEY]: navActions,
+      [META_KEY]: {
+        startUrl,
+        currentPage,
+        fieldCount: fields.length,
+        navCount: navActions.length,
+        recording,
+        lastUpdated: Date.now(),
+      },
+    });
+  } catch {
+    // storage.session may be unavailable in some contexts
+  }
+}
+
+// ── Public API (called via chrome.runtime messages) ──────────────────────────
+
+export function startRecording() {
+  if (recording) return { ok: false, reason: 'Already recording' };
+
+  recording = true;
+  startUrl = location.href;
+  currentPage = 0;
+  fieldMap.clear();
+  navActions.length = 0;
+
+  // Attach listeners
+  document.addEventListener('mousemove', trackMouse, { passive: true });
+  document.addEventListener('input', handleFieldInteraction, { capture: true, passive: true });
+  document.addEventListener('change', handleFieldInteraction, { capture: true, passive: true });
+  document.addEventListener('focus', handleFieldInteraction, { capture: true, passive: true });
+  document.addEventListener('click', handlePossibleNavigation, { capture: true });
+
+  // Start observing DOM mutations for conditional fields
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Auto-discover existing fields on the page
+  const existingFields = document.querySelectorAll('input, select, textarea');
+  existingFields.forEach(el => {
+    if (!isFormField(el)) return;
+    const descriptor = captureField(el, '', null);
+    descriptor.page = currentPage;
+    descriptor.autoDiscovered = true;
+    fieldMap.set(fieldKey(el), descriptor);
+  });
+
+  void persistFields();
+  return { ok: true, fieldCount: fieldMap.size };
+}
+
+export function stopRecording() {
+  if (!recording) return { ok: false, reason: 'Not recording' };
+
+  recording = false;
+
+  // Detach listeners
+  document.removeEventListener('mousemove', trackMouse);
+  document.removeEventListener('input', handleFieldInteraction, { capture: true });
+  document.removeEventListener('change', handleFieldInteraction, { capture: true });
+  document.removeEventListener('focus', handleFieldInteraction, { capture: true });
+  document.removeEventListener('click', handlePossibleNavigation, { capture: true });
+  observer.disconnect();
+
+  void persistFields();
+
+  return {
+    ok: true,
+    fields: Array.from(fieldMap.values()),
+    navActions: [...navActions],
+    startUrl,
+    totalPages: currentPage + 1,
+  };
+}
+
+export function getRecordingState() {
+  return {
+    recording,
+    fieldCount: fieldMap.size,
+    currentPage,
+    navCount: navActions.length,
+    startUrl,
+  };
+}
+
+// ── Message Listener ─────────────────────────────────────────────────────────
+// The background script and popup communicate with this content script
+// via chrome.runtime messages.
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || typeof message !== 'object') return;
+
+  if (message.type === 'FORM_RECORDER_START') {
+    const result = startRecording();
+    sendResponse(result);
+    return;
+  }
+
+  if (message.type === 'FORM_RECORDER_STOP') {
+    const result = stopRecording();
+    sendResponse(result);
+    return;
+  }
+
+  if (message.type === 'FORM_RECORDER_STATUS') {
+    sendResponse(getRecordingState());
+    return;
+  }
+});
