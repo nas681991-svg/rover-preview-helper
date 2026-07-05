@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow DOM Form Test Fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 24px; background: #1a1a2e; color: #e0e0e0; }
+    h1 { color: #00d4ff; }
+    .light-root { background: #16213e; padding: 20px; border-radius: 8px; margin-top: 16px; }
+    /* Styles for light-DOM fallback fields */
+    input, select, textarea {
+      display: block; margin: 8px 0 16px; padding: 8px 12px;
+      background: #0f3460; border: 1px solid #533483; color: #e0e0e0;
+      border-radius: 4px; width: 280px; font-size: 14px;
+    }
+    label { font-weight: 600; color: #a8dadc; }
+  </style>
+</head>
+<body>
+  <h1>Shadow DOM Form Test</h1>
+  <p>This page contains form inputs inside Shadow DOM roots for testing selector traversal.</p>
+
+  <!-- Light-DOM reference field (should always be findable) -->
+  <div class="light-root">
+    <label for="light-name">Light DOM Name</label>
+    <input type="text" id="light-name" name="lightName" aria-label="Light DOM Name">
+  </div>
+
+  <!-- Custom element with Shadow Root -->
+  <shadow-form id="shadow-form-host"></shadow-form>
+
+  <!-- Nested shadow: outer host contains inner host -->
+  <nested-shadow id="nested-shadow-host"></nested-shadow>
+
+  <script>
+    // ── Single-level Shadow DOM ──────────────────────────────────────────────
+    class ShadowForm extends HTMLElement {
+      constructor() {
+        super();
+        const shadow = this.attachShadow({ mode: 'open' });
+        shadow.innerHTML = `
+          <style>
+            :host { display: block; background: #16213e; padding: 20px; border-radius: 8px; margin-top: 16px; }
+            label { font-weight: 600; color: #a8dadc; display: block; }
+            input, select, textarea {
+              display: block; margin: 8px 0 16px; padding: 8px 12px;
+              background: #0f3460; border: 1px solid #533483; color: #e0e0e0;
+              border-radius: 4px; width: 280px; font-size: 14px;
+            }
+          </style>
+          <h2 style="color: #e94560;">Shadow DOM Fields</h2>
+          <label for="shadow-email">Email (Shadow)</label>
+          <input type="email" id="shadow-email" name="shadowEmail" aria-label="Shadow Email">
+
+          <label for="shadow-country">Country (Shadow)</label>
+          <select id="shadow-country" name="shadowCountry" aria-label="Shadow Country">
+            <option value="">-- Select --</option>
+            <option value="us">United States</option>
+            <option value="ca">Canada</option>
+            <option value="uk">United Kingdom</option>
+            <option value="au">Australia</option>
+          </select>
+
+          <label for="shadow-notes">Notes (Shadow)</label>
+          <textarea id="shadow-notes" name="shadowNotes" rows="3" aria-label="Shadow Notes"></textarea>
+        `;
+      }
+    }
+    customElements.define('shadow-form', ShadowForm);
+
+    // ── Nested Shadow DOM ────────────────────────────────────────────────────
+    class NestedShadow extends HTMLElement {
+      constructor() {
+        super();
+        const outer = this.attachShadow({ mode: 'open' });
+        outer.innerHTML = `
+          <style>
+            :host { display: block; background: #1a1a2e; padding: 20px; border-radius: 8px; margin-top: 16px; border: 1px solid #533483; }
+          </style>
+          <h2 style="color: #e94560;">Nested Shadow DOM</h2>
+          <inner-shadow></inner-shadow>
+        `;
+
+        // Define inner element within this scope
+        class InnerShadow extends HTMLElement {
+          constructor() {
+            super();
+            const inner = this.attachShadow({ mode: 'open' });
+            inner.innerHTML = `
+              <style>
+                label { font-weight: 600; color: #a8dadc; display: block; }
+                input { display: block; margin: 8px 0 16px; padding: 8px 12px;
+                  background: #0f3460; border: 1px solid #533483; color: #e0e0e0;
+                  border-radius: 4px; width: 280px; font-size: 14px; }
+              </style>
+              <label for="nested-input">Nested Input</label>
+              <input type="text" id="nested-input" name="nestedInput" aria-label="Deeply Nested Input">
+            `;
+          }
+        }
+        if (!customElements.get('inner-shadow')) {
+          customElements.define('inner-shadow', InnerShadow);
+        }
+      }
+    }
+    customElements.define('nested-shadow', NestedShadow);
+  </script>
+</body>
+</html>

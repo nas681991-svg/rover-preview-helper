@@ -99,8 +99,24 @@ async function fillFieldByCoordinates(tabId, fieldInfo, value) {
     // Attach debugger
     await chrome.debugger.attach({ tabId }, '1.3');
 
-    const x = fieldInfo.coords.pageX;
-    const y = fieldInfo.coords.pageY;
+    // Scroll to the coordinate and get viewport-relative x/y
+    const scrollResult = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (pageX, pageY) => {
+        window.scrollTo({
+          left: Math.max(0, pageX - window.innerWidth / 2),
+          top: Math.max(0, pageY - window.innerHeight / 2),
+          behavior: 'instant'
+        });
+        return {
+          x: pageX - window.scrollX,
+          y: pageY - window.scrollY
+        };
+      },
+      args: [fieldInfo.coords.pageX, fieldInfo.coords.pageY]
+    });
+    
+    const { x, y } = scrollResult[0].result;
 
     // Click at the recorded coordinates
     await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
@@ -149,7 +165,20 @@ async function clickNavigation(tabId, navAction) {
     if (navAction.coords?.pageX && navAction.coords?.pageY) {
       try {
         await chrome.debugger.attach({ tabId }, '1.3');
-        const { pageX: x, pageY: y } = navAction.coords;
+        const scrollResult = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (pageX, pageY) => {
+            window.scrollTo({
+              left: Math.max(0, pageX - window.innerWidth / 2),
+              top: Math.max(0, pageY - window.innerHeight / 2),
+              behavior: 'instant'
+            });
+            return { x: pageX - window.scrollX, y: pageY - window.scrollY };
+          },
+          args: [navAction.coords.pageX, navAction.coords.pageY]
+        });
+        
+        const { x, y } = scrollResult[0].result;
         await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
           type: 'mousePressed', x, y, button: 'left', clickCount: 1,
         });

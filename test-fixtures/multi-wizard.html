@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multi-Page Wizard Test Fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 24px; background: #1a1a2e; color: #e0e0e0; }
+    h1 { color: #00d4ff; }
+    .wizard-page { background: #16213e; padding: 20px; border-radius: 8px; margin-top: 16px; }
+    .wizard-page.hidden { display: none; }
+    label { font-weight: 600; color: #a8dadc; display: block; margin-top: 12px; }
+    input, select {
+      display: block; margin: 8px 0; padding: 8px 12px;
+      background: #0f3460; border: 1px solid #533483; color: #e0e0e0;
+      border-radius: 4px; width: 280px; font-size: 14px;
+    }
+    button {
+      margin-top: 16px; padding: 10px 24px;
+      background: #e94560; color: white; border: none; border-radius: 4px;
+      font-size: 14px; cursor: pointer; font-weight: 600;
+    }
+    button:hover { background: #c73e54; }
+    .step-indicator { color: #533483; font-size: 13px; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Multi-Page Wizard</h1>
+  <p id="step-text" class="step-indicator">Step 1 of 3</p>
+
+  <!-- Page 1 -->
+  <div id="page-1" class="wizard-page">
+    <h2 style="color: #e94560;">Personal Information</h2>
+    <label for="first-name">First Name</label>
+    <input type="text" id="first-name" name="firstName" aria-label="First Name">
+
+    <label for="last-name">Last Name</label>
+    <input type="text" id="last-name" name="lastName" aria-label="Last Name">
+
+    <label for="dob">Date of Birth</label>
+    <input type="date" id="dob" name="dob" aria-label="Date of Birth">
+
+    <button id="next-1" type="button">Next</button>
+  </div>
+
+  <!-- Page 2 (initially hidden) -->
+  <div id="page-2" class="wizard-page hidden">
+    <h2 style="color: #e94560;">Contact Details</h2>
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" aria-label="Email">
+
+    <label for="phone">Phone</label>
+    <input type="tel" id="phone" name="phone" aria-label="Phone">
+
+    <label for="country">Country</label>
+    <select id="country" name="country" aria-label="Country">
+      <option value="">-- Select --</option>
+      <option value="us">United States</option>
+      <option value="ca">Canada</option>
+      <option value="uk">United Kingdom</option>
+      <option value="au">Australia</option>
+    </select>
+
+    <button id="next-2" type="button">Next</button>
+  </div>
+
+  <!-- Page 3 (initially hidden, loaded after delay) -->
+  <!-- This page is NOT in the DOM initially — it's dynamically injected after Next on page 2 -->
+
+  <script>
+    const page1 = document.getElementById('page-1');
+    const page2 = document.getElementById('page-2');
+    const stepText = document.getElementById('step-text');
+
+    // Page 1 → Page 2 transition (with 500ms delay to test waitForDomStability)
+    document.getElementById('next-1').addEventListener('click', () => {
+      page1.classList.add('hidden');
+      stepText.textContent = 'Loading...';
+
+      setTimeout(() => {
+        page2.classList.remove('hidden');
+        stepText.textContent = 'Step 2 of 3';
+      }, 500);
+    });
+
+    // Page 2 → Page 3 transition (dynamic injection with delay)
+    document.getElementById('next-2').addEventListener('click', () => {
+      page2.classList.add('hidden');
+      stepText.textContent = 'Loading...';
+
+      setTimeout(() => {
+        // Dynamically inject page 3 into the DOM
+        const page3 = document.createElement('div');
+        page3.id = 'page-3';
+        page3.className = 'wizard-page';
+        page3.innerHTML = `
+          <h2 style="color: #e94560;">Address</h2>
+          <label for="street">Street</label>
+          <input type="text" id="street" name="street" aria-label="Street">
+
+          <label for="city">City</label>
+          <input type="text" id="city" name="city" aria-label="City">
+
+          <label for="zip">Zip Code</label>
+          <input type="text" id="zip" name="zip" aria-label="Zip Code">
+
+          <button id="submit-form" type="button">Submit</button>
+        `;
+        document.body.appendChild(page3);
+        stepText.textContent = 'Step 3 of 3';
+
+        // Submit handler
+        page3.querySelector('#submit-form').addEventListener('click', () => {
+          stepText.textContent = 'Form submitted!';
+          page3.classList.add('hidden');
+        });
+      }, 500);
+    });
+  </script>
+</body>
+</html>

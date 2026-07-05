@@ -149,8 +149,24 @@ function deriveColumnName(field, index) {
  * @returns {{ columns: string[], selectorMap: Map<string, Object>, rows: Object[], navActions: Object[] }}
  */
 export function parseCSV(csvText) {
-  const rawLines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const lines = rawLines.filter(l => l.trim().length > 0);
+  const text = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = [];
+  let currentLine = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      currentLine += ch;
+    } else if (ch === '\n' && !inQuotes) {
+      if (currentLine.trim().length > 0) lines.push(currentLine);
+      currentLine = '';
+    } else {
+      currentLine += ch;
+    }
+  }
+  if (currentLine.trim().length > 0) lines.push(currentLine);
 
   if (lines.length < 2) {
     throw new Error('CSV must have at least a header row and one data row.');

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Error Form Test Fixture</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 24px; background: #1a1a2e; color: #e0e0e0; }
+    h1 { color: #00d4ff; }
+    .form-group { margin: 16px 0; }
+    label { font-weight: 600; color: #a8dadc; display: block; margin-bottom: 4px; }
+    input, select, textarea {
+      display: block; margin: 4px 0; padding: 8px 12px;
+      background: #0f3460; border: 1px solid #533483; color: #e0e0e0;
+      border-radius: 4px; width: 280px; font-size: 14px;
+    }
+    /* Error styling — red border on invalid inputs */
+    input.has-error {
+      border-color: rgb(220, 38, 38);
+    }
+    .error {
+      color: #ef4444; font-size: 13px; margin-top: 4px;
+    }
+    .field-error {
+      color: #f97316; font-size: 12px; font-style: italic;
+    }
+    .invalid-feedback {
+      color: #fb923c; font-size: 12px;
+    }
+    [role="alert"] {
+      background: #7f1d1d; color: #fca5a5; padding: 12px;
+      border-radius: 4px; margin: 16px 0; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>Error Form Test</h1>
+  <p>This page has deliberate validation errors for testing <code>detectErrors()</code>.</p>
+
+  <!-- 1. role="alert" element -->
+  <div role="alert">Form submission failed: please correct the errors below.</div>
+
+  <!-- 2. .error class div -->
+  <div class="form-group">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="not-an-email"
+           aria-invalid="true" aria-describedby="email-err"
+           class="has-error">
+    <div class="error" id="email-error-div">Please enter a valid email address</div>
+    <span id="email-err" class="invalid-feedback">Invalid email format</span>
+  </div>
+
+  <!-- 3. aria-invalid with aria-describedby -->
+  <div class="form-group">
+    <label for="phone">Phone Number</label>
+    <input type="tel" id="phone" name="phone" value="abc"
+           aria-invalid="true" aria-describedby="phone-err" aria-label="Phone Number">
+    <span id="phone-err" class="field-error">Must contain only digits</span>
+  </div>
+
+  <!-- 4. .error class with longer text (should still be captured, under 200 chars) -->
+  <div class="form-group">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" value="123">
+    <div class="error">Password must be at least 8 characters and contain a number and special character</div>
+  </div>
+
+  <!-- 5. aria-invalid without aria-describedby, but with .error next sibling -->
+  <div class="form-group">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" value="a"
+           aria-invalid="true" aria-label="Username">
+    <div class="error">Username must be at least 3 characters</div>
+  </div>
+
+  <!-- 6. A valid field (no errors — should NOT appear in detectErrors output) -->
+  <div class="form-group">
+    <label for="city">City</label>
+    <input type="text" id="city" name="city" value="Springfield">
+  </div>
+
+  <!-- 7. An oversized .error text (>200 chars) — should be filtered out -->
+  <div class="error">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</div>
+</body>
+</html>
