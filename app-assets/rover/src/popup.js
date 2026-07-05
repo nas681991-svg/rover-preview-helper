@@ -1,4 +1,5 @@
 import { normalizeConfig, validateConfigInput, STORAGE_KEY_PREFIX, STATUS_KEY_PREFIX } from './shared.js';
+import { generateTemplate, parseCSV } from './form-recorder/csv-engine.js';
 
 const configEl = document.getElementById('config');
 const statusEl = document.getElementById('status');
@@ -431,47 +432,7 @@ if (recorderStopBtn) {
 if (downloadCsvBtn) {
   downloadCsvBtn.addEventListener('click', () => {
     if (!currentFormMap) { setStatus('No recording to export.', true); return; }
-
-    const { fields = [], navActions = [], totalPages = 1 } = currentFormMap;
-    const pageGroups = [];
-    for (let p = 0; p < totalPages; p++) {
-      pageGroups.push(fields.filter(f => f.page === p));
-    }
-
-    const columns = [];
-    for (let p = 0; p < pageGroups.length; p++) {
-      for (const field of pageGroups[p]) {
-        const header = field.label || field.name ||
-          (field.name ? field.name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ') : null) ||
-          `Field ${columns.length + 1}`;
-        const selectorMeta = (field.selectorChain || []).join('|');
-        const coordsMeta = field.coords ? `coords:${field.coords.pageX},${field.coords.pageY}` : '';
-        columns.push({
-          header,
-          metadata: `selector:${selectorMeta};type:${field.fieldType}${coordsMeta ? ';' + coordsMeta : ''}`,
-          example: field.value ?? '',
-        });
-      }
-      if (p < pageGroups.length - 1) {
-        const nav = navActions.find(n => n.page === p);
-        columns.push({
-          header: `__NAV_${p + 1}__`,
-          metadata: `nav:click:${nav?.selector || ''};${nav?.coords ? `coords:${nav.coords.pageX},${nav.coords.pageY}` : ''}`.replace(/;$/, ''),
-          example: '',
-        });
-      }
-    }
-
-    const esc = v => {
-      const s = String(v ?? '');
-      return (s.includes('"') || s.includes(',') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const csv = [
-      columns.map(c => esc(c.header)).join(','),
-      '# ' + columns.map(c => esc(c.metadata)).join(','),
-      columns.map(c => esc(c.example)).join(','),
-      '',
-    ].join('\n');
+    const csv = generateTemplate(currentFormMap);
 
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -491,59 +452,15 @@ if (uploadCsvInput) {
     const tab = await getActiveTab();
     if (!tab?.id) { setStatus('No active tab.', true); return; }
 
-    const parseRow = line => {
-      const fields = []; let cur = ''; let inQ = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (inQ) { if (ch === '"') { if (line[i+1] === '"') { cur += '"'; i++; } else inQ = false; } else cur += ch; }
-        else { if (ch === '"') inQ = true; else if (ch === ',') { fields.push(cur); cur = ''; } else cur += ch; }
-      }
-      fields.push(cur);
-      return fields;
-    };
-
-    const rawLines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
-    if (rawLines.length < 2) { setStatus('CSV needs at least a header and one data row.', true); return; }
-
-    const cols = parseRow(rawLines[0]);
-    let dataStart = 1;
-    let metaLine = null;
-    if (rawLines[1]?.startsWith('# ')) { metaLine = rawLines[1].slice(2); dataStart = 2; }
-
-    const selectorMap = new Map();
-    const csvNavActions = [];
-    if (metaLine) {
-      const metaFields = parseRow(metaLine);
-      for (let i = 0; i < cols.length && i < metaFields.length; i++) {
-        const col = cols[i]; const meta = metaFields[i];
-        if (col.startsWith('__NAV_')) {
-          const nav = { column: col, index: i };
-          meta.split(';').forEach(p => {
-            if (p.startsWith('nav:click:')) nav.selector = p.slice(10);
-            if (p.startsWith('coords:')) { const [x,y] = p.slice(7).split(',').map(Number); nav.coords = {pageX:x,pageY:y}; }
-          });
-          csvNavActions.push(nav);
-        } else {
-          const fi = { column: col, index: i, selectorChain: [], fieldType: 'text', coords: null };
-          meta.split(';').forEach(p => {
-            if (p.startsWith('selector:')) fi.selectorChain = p.slice(9).split('|');
-            if (p.startsWith('type:')) fi.fieldType = p.slice(5);
-            if (p.startsWith('coords:')) { const [x,y] = p.slice(7).split(',').map(Number); fi.coords = {pageX:x,pageY:y}; }
-          });
-          selectorMap.set(col, fi);
-        }
-      }
+    let parsed;
+    try {
+      parsed = parseCSV(text);
+    } catch (err) {
+      setStatus(`CSV Error: ${err.message}`, true);
+      return;
     }
 
-    const rows = [];
-    for (let i = dataStart; i < rawLines.length; i++) {
-      const vals = parseRow(rawLines[i]);
-      const row = {};
-      cols.forEach((c,j) => { row[c] = vals[j] ?? ''; });
-      rows.push(row);
-    }
-
-    setStatus(`Starting bulk fill: ${rows.length} rows…`);
+    setStatus(`Starting bulk fill: ${parsed.rows.length} rows…`);
     if (replayProgress) replayProgress.style.display = 'block';
     if (recorderActions) recorderActions.style.display = 'none';
 
@@ -551,7 +468,12 @@ if (uploadCsvInput) {
       type: 'FORM_REPLAY_START',
       tabId: tab.id,
       formMapId: currentFormMap.id,
-      parsedCSV: { columns: cols, selectorMap: Object.fromEntries(selectorMap), rows, navActions: csvNavActions },
+      parsedCSV: {
+        columns: parsed.columns,
+        selectorMap: Object.fromEntries(parsed.selectorMap),
+        rows: parsed.rows,
+        navActions: parsed.navActions
+      },
     });
   });
 }
