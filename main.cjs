@@ -72,7 +72,9 @@ async function downloadExtensionUpdate(url, destZip, extractDir, isCrx = false) 
     }
 
     fs.mkdirSync(path.dirname(destZip), { recursive: true });
-    fs.writeFileSync(destZip, zipBuffer);
+    const tempDestZip = `${destZip}.tmp.${Date.now()}`;
+    fs.writeFileSync(tempDestZip, zipBuffer);
+    fs.renameSync(tempDestZip, destZip);
 
     const zip = new AdmZip(destZip);
     await new Promise((resolve, reject) => {
@@ -273,7 +275,7 @@ ipcMain.handle('read-record', async (event, filePath) => {
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
     const resolved = fs.realpathSync(path.resolve(filePath));
     const normalizedResolved = isWin ? resolved.toLowerCase() : resolved;
-    const normalizedBase = isWin ? myRecordsPath.toLowerCase() : myRecordsPath;
+    const normalizedBase = (isWin ? myRecordsPath.toLowerCase() : myRecordsPath) + (myRecordsPath.endsWith(path.sep) ? '' : path.sep);
     if (!normalizedResolved.startsWith(normalizedBase)) {
       return 'Error: Access denied — path outside MyRecords directory.';
     }
