@@ -391,6 +391,308 @@ async function runFullTests(context, page, extId) {
   assert(!tabBadgeVisible, 'Tab badge hidden after tab close');
 
   await popup2.close();
+
+  // ── Test 9: Config validation (#4) ────────────────────────────────────────
+  console.log('\n── Test 9: Config validation UI ──');
+  const popupVal = await context.newPage();
+  await popupVal.goto(`chrome-extension://${extId}/src/popup.html`);
+  await sleep(1500);
+
+  const cdpVal = await context.newCDPSession(popupVal);
+
+  // 9a: Valid config shows green indicator
+  const valid9a = await cdpVal.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const ta = document.getElementById('config');
+      ta.value = JSON.stringify({ siteId: 'test', publicKey: 'pk_test' });
+      ta.dispatchEvent(new Event('input'));
+      await new Promise(r => setTimeout(r, 200));
+      const el = document.getElementById('config-validation');
+      return {
+        display: el?.style.display,
+        className: el?.className,
+        text: el?.textContent,
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const v9a = valid9a.result?.value || {};
+  assert(v9a.className?.includes('valid'), 'Valid config shows green indicator', `Got class: ${v9a.className}`);
+  assert(v9a.text?.includes('Valid'), 'Valid config text says Valid', `Got: ${v9a.text}`);
+
+  // 9b: Invalid JSON shows red indicator
+  const valid9b = await cdpVal.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const ta = document.getElementById('config');
+      ta.value = '{ broken json';
+      ta.dispatchEvent(new Event('input'));
+      await new Promise(r => setTimeout(r, 200));
+      const el = document.getElementById('config-validation');
+      return {
+        className: el?.className,
+        text: el?.textContent,
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const v9b = valid9b.result?.value || {};
+  assert(v9b.className?.includes('error'), 'Invalid JSON shows error indicator', `Got class: ${v9b.className}`);
+  assert(v9b.text?.includes('Invalid JSON'), 'Error text mentions Invalid JSON', `Got: ${v9b.text}`);
+
+  // 9c: Missing required fields shows error
+  const valid9c = await cdpVal.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const ta = document.getElementById('config');
+      ta.value = JSON.stringify({ mode: 'full' });
+      ta.dispatchEvent(new Event('input'));
+      await new Promise(r => setTimeout(r, 200));
+      const el = document.getElementById('config-validation');
+      return {
+        className: el?.className,
+        text: el?.textContent,
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const v9c = valid9c.result?.value || {};
+  assert(v9c.className?.includes('error'), 'Missing fields shows error indicator', `Got class: ${v9c.className}`);
+  assert(v9c.text?.includes('siteId') || v9c.text?.includes('publicKey'), 'Error mentions missing field', `Got: ${v9c.text}`);
+
+  // 9d: Empty config hides indicator
+  const valid9d = await cdpVal.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const ta = document.getElementById('config');
+      ta.value = '';
+      ta.dispatchEvent(new Event('input'));
+      await new Promise(r => setTimeout(r, 200));
+      const el = document.getElementById('config-validation');
+      return { display: el?.style.display };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const v9d = valid9d.result?.value || {};
+  assert(v9d.display === 'none', 'Empty config hides validation indicator', `Got display: ${v9d.display}`);
+
+  await cdpVal.detach();
+  await popupVal.close();
+
+  // ── Test 10: Diagnostics panel (#2) ────────────────────────────────────────
+  console.log('\n── Test 10: Diagnostics system ──');
+  const popupDiag = await context.newPage();
+  await popupDiag.goto(`chrome-extension://${extId}/src/popup.html`);
+  await sleep(1500);
+
+  const cdpDiag = await context.newCDPSession(popupDiag);
+
+  // Write a diagnostic entry directly to storage, then reload popup
+  const diag10 = await cdpDiag.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const DIAG_KEY = 'rover-preview-helper:diagnostics';
+      const testEntries = [
+        { ts: Date.now(), level: 'warn', context: 'test-context', message: 'Test warning message' },
+        { ts: Date.now(), level: 'error', context: 'test-error', message: 'Test error message' },
+      ];
+      await chrome.storage.session.set({ [DIAG_KEY]: testEntries });
+      return { written: true };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  assert(diag10.result?.value?.written, 'Diagnostics written to storage');
+
+  // Reload popup to trigger renderDiagnostics
+  await popupDiag.reload({ waitUntil: 'load' });
+  await sleep(1500);
+
+  const cdpDiag2 = await context.newCDPSession(popupDiag);
+  const diag10b = await cdpDiag2.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const panel = document.getElementById('diagnostics-panel');
+      const count = document.getElementById('diag-count');
+      const list = document.getElementById('diagnostics-list');
+      return {
+        panelDisplay: panel?.style.display,
+        count: count?.textContent,
+        entries: list?.children.length,
+        hasWarnEntry: list?.innerHTML.includes('Test warning'),
+        hasErrorEntry: list?.innerHTML.includes('Test error'),
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const d10 = diag10b.result?.value || {};
+  assert(d10.panelDisplay !== 'none', 'Diagnostics panel visible when entries exist');
+  assert(d10.count === '2', 'Diagnostics count shows 2', `Got: ${d10.count}`);
+  assert(d10.entries === 2, 'Two diagnostic entries rendered', `Got: ${d10.entries}`);
+  assert(d10.hasWarnEntry, 'Warning entry rendered');
+  assert(d10.hasErrorEntry, 'Error entry rendered');
+
+  // Test clear button
+  const diag10c = await cdpDiag2.send('Runtime.evaluate', {
+    expression: `(async () => {
+      document.getElementById('diag-clear')?.click();
+      await new Promise(r => setTimeout(r, 500));
+      const panel = document.getElementById('diagnostics-panel');
+      const DIAG_KEY = 'rover-preview-helper:diagnostics';
+      const stored = await chrome.storage.session.get(DIAG_KEY);
+      return {
+        panelDisplay: panel?.style.display,
+        storedEntries: (stored[DIAG_KEY] || []).length,
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const d10c = diag10c.result?.value || {};
+  assert(d10c.panelDisplay === 'none', 'Diagnostics panel hidden after clear');
+  assert(d10c.storedEntries === 0, 'Storage cleared after clear click', `Got: ${d10c.storedEntries}`);
+
+  await cdpDiag2.detach();
+  await popupDiag.close();
+
+  // ── Test 11: Sessions panel (#5) ─────────────────────────────────────────
+  console.log('\n── Test 11: Sessions panel ──');
+  const popupSess = await context.newPage();
+  await popupSess.goto(`chrome-extension://${extId}/src/popup.html`);
+  await sleep(1500);
+
+  const cdpSess = await context.newCDPSession(popupSess);
+
+  // Seed fake session states for 2 tabs
+  const sess11 = await cdpSess.send('Runtime.evaluate', {
+    expression: `(async () => {
+      await chrome.storage.session.set({
+        'rover-preview-helper:tab:99901': {
+          siteId: 'site-alpha',
+          targetHost: 'alpha.example.com',
+          sessionTokenExpiresAt: 0,
+          configRefreshedAt: Date.now() - 120000,
+        },
+        'rover-preview-helper:tab:99902': {
+          siteId: 'site-beta',
+          targetHost: 'beta.example.com',
+          sessionTokenExpiresAt: Date.now() + 30000, // expiring soon
+          configRefreshedAt: Date.now() - 60000,
+        },
+      });
+      return { seeded: true };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  assert(sess11.result?.value?.seeded, 'Session states seeded');
+
+  // Reload popup to render sessions
+  await popupSess.reload({ waitUntil: 'load' });
+  await sleep(1500);
+
+  const cdpSess2 = await context.newCDPSession(popupSess);
+  const sess11b = await cdpSess2.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const panel = document.getElementById('sessions-panel');
+      const count = document.getElementById('sessions-count');
+      const list = document.getElementById('sessions-list');
+      const rows = list?.querySelectorAll('.session-row') || [];
+      const hosts = Array.from(rows).map(r => r.querySelector('.session-host')?.textContent || '');
+      const dots = Array.from(rows).map(r => r.querySelector('.session-dot')?.className || '');
+      return {
+        panelDisplay: panel?.style.display,
+        count: count?.textContent,
+        rowCount: rows.length,
+        hosts,
+        dots,
+        hasDisconnect: Array.from(rows).every(r => !!r.querySelector('.session-disconnect')),
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const s11 = sess11b.result?.value || {};
+  assert(s11.panelDisplay !== 'none', 'Sessions panel visible with active sessions');
+  // Count may include other sessions from earlier tests
+  assert(Number(s11.count) >= 2, `Sessions count >= 2`, `Got: ${s11.count}`);
+  assert(s11.rowCount >= 2, `At least 2 session rows rendered`, `Got: ${s11.rowCount}`);
+  assert(s11.hosts.some(h => h.includes('alpha')), 'Alpha host shown in sessions');
+  assert(s11.hosts.some(h => h.includes('beta')), 'Beta host shown in sessions');
+  assert(s11.dots.some(d => d.includes('expiring')), 'Expiring session has yellow dot');
+  assert(s11.hasDisconnect, 'All rows have disconnect button');
+
+  // Clean up fake sessions
+  await cdpSess2.send('Runtime.evaluate', {
+    expression: `(async () => {
+      await chrome.storage.session.remove(['rover-preview-helper:tab:99901', 'rover-preview-helper:tab:99902']);
+    })()`,
+    awaitPromise: true,
+  });
+
+  await cdpSess2.detach();
+  await popupSess.close();
+
+  // ── Test 12: Alarms permission (#3) ──────────────────────────────────────
+  console.log('\n── Test 12: Alarms permission & registration ──');
+  const popupAlarm = await context.newPage();
+  await popupAlarm.goto(`chrome-extension://${extId}/src/popup.html`);
+  await sleep(1000);
+
+  const cdpAlarm = await context.newCDPSession(popupAlarm);
+  const alarm12 = await cdpAlarm.send('Runtime.evaluate', {
+    expression: `(async () => {
+      const alarms = await chrome.alarms.getAll();
+      const tokenAlarm = alarms.find(a => a.name === 'rover-token-refresh');
+      return {
+        alarmCount: alarms.length,
+        hasTokenAlarm: !!tokenAlarm,
+        period: tokenAlarm?.periodInMinutes || null,
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const a12 = alarm12.result?.value || {};
+  assert(a12.hasTokenAlarm, 'Token refresh alarm registered');
+  assert(a12.period === 1, 'Alarm fires every 1 minute', `Got period: ${a12.period}`);
+
+  await cdpAlarm.detach();
+  await popupAlarm.close();
+
+  // ── Test 13: New popup UI elements present ───────────────────────────────
+  console.log('\n── Test 13: New UI elements present ──');
+  const popupUI = await context.newPage();
+  await popupUI.goto(`chrome-extension://${extId}/src/popup.html`);
+  await sleep(1000);
+
+  const cdpUI = await context.newCDPSession(popupUI);
+  const ui13 = await cdpUI.send('Runtime.evaluate', {
+    expression: `({
+      hasValidation: !!document.getElementById('config-validation'),
+      hasSessionsPanel: !!document.getElementById('sessions-panel'),
+      hasSessionsList: !!document.getElementById('sessions-list'),
+      hasSessionsCount: !!document.getElementById('sessions-count'),
+      hasDiagPanel: !!document.getElementById('diagnostics-panel'),
+      hasDiagList: !!document.getElementById('diagnostics-list'),
+      hasDiagCount: !!document.getElementById('diag-count'),
+      hasDiagClear: !!document.getElementById('diag-clear'),
+    })`,
+    returnByValue: true,
+  });
+  const u13 = ui13.result?.value || {};
+  assert(u13.hasValidation, 'Validation indicator element exists');
+  assert(u13.hasSessionsPanel, 'Sessions panel element exists');
+  assert(u13.hasSessionsList, 'Sessions list element exists');
+  assert(u13.hasSessionsCount, 'Sessions count element exists');
+  assert(u13.hasDiagPanel, 'Diagnostics panel element exists');
+  assert(u13.hasDiagList, 'Diagnostics list element exists');
+  assert(u13.hasDiagCount, 'Diagnostics count element exists');
+  assert(u13.hasDiagClear, 'Diagnostics clear button exists');
+
+  await cdpUI.detach();
+  await popupUI.close();
+
   await context.close();
 }
 
@@ -411,6 +713,10 @@ async function runLiteTests(context, extPath) {
     tabBadge: !!document.getElementById('tab-badge'),
     tabCard: !!document.getElementById('tab-card'),
     configHelp: !!document.getElementById('config-help'),
+    configValidation: !!document.getElementById('config-validation'),
+    sessionsPanel: !!document.getElementById('sessions-panel'),
+    diagPanel: !!document.getElementById('diagnostics-panel'),
+    diagClear: !!document.getElementById('diag-clear'),
     injectText: document.getElementById('inject')?.textContent || '',
     reconnectText: document.getElementById('reconnect')?.textContent || '',
   }));
@@ -421,6 +727,10 @@ async function runLiteTests(context, extPath) {
   assert(els.status, 'Status element present');
   assert(els.tabBadge, 'Tab badge element present');
   assert(els.tabCard, 'Tab card element present');
+  assert(els.configValidation, 'Config validation indicator present');
+  assert(els.sessionsPanel, 'Sessions panel present');
+  assert(els.diagPanel, 'Diagnostics panel present');
+  assert(els.diagClear, 'Diagnostics clear button present');
   assert(els.injectText.includes('Inject Rover'), 'Inject button text correct');
   assert(els.reconnectText.includes('Reconnect'), 'Reconnect button text correct');
 
@@ -455,6 +765,7 @@ async function runLiteTests(context, extPath) {
         hasIsHostAllowed: typeof mod.isHostAllowed === 'function',
         hasExtractParams: typeof mod.extractPreviewLaunchParams === 'function',
         hasSerialize: typeof mod.serializeConfigForSeed === 'function',
+        hasValidateConfig: typeof mod.validateConfigInput === 'function',
         storagePrefix: mod.STORAGE_KEY_PREFIX,
         statusPrefix: mod.STATUS_KEY_PREFIX,
       };
@@ -466,6 +777,7 @@ async function runLiteTests(context, extPath) {
     assert(sharedOk.hasIsHostAllowed, 'isHostAllowed exported');
     assert(sharedOk.hasExtractParams, 'extractPreviewLaunchParams exported');
     assert(sharedOk.hasSerialize, 'serializeConfigForSeed exported');
+    assert(sharedOk.hasValidateConfig, 'validateConfigInput exported');
     assert(typeof sharedOk.storagePrefix === 'string', 'STORAGE_KEY_PREFIX exported');
     assert(typeof sharedOk.statusPrefix === 'string', 'STATUS_KEY_PREFIX exported');
   } else {
