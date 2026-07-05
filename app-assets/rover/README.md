@@ -224,6 +224,11 @@ The popup is not asking for the production install snippet. It wants JSON only.
 - keeps hosted handoff scoping tied to the intended target host
 - lets generic reusable/exact configs keep re-injecting while later pages stay inside `allowedDomains`
 - rejects tabs whose host is outside the config's `allowedDomains`
+- validates config schema in real-time within the popup
+- orchestrates multiple active preview sessions via a dedicated Dashboard
+- maintains Service Worker crash resilience and ephemeral state cleanup
+- records structured error telemetry (Diagnostics Panel) for easier debugging
+- auto-refreshes preview tokens in the background via `chrome.alarms`
 
 ## What it does not do
 
@@ -285,6 +290,27 @@ Be careful not to:
 - widen host scoping unintentionally
 - persist preview tokens longer than needed
 - confuse short-lived preview tokens with persistent Workspace site keys
+
+## Testing
+
+The extension includes a comprehensive End-to-End (E2E) integration test suite built with **Patchright** (a fork of Playwright designed to bypass bot-detection and extension restrictions).
+
+To run the unit tests:
+```bash
+pnpm test
+```
+
+To run the E2E integration tests:
+```bash
+pnpm test:integration
+```
+
+The E2E suite covers:
+- Core extension lifecycle and content script injection
+- UI rendering and config validation
+- CDP-based CSP bypass and sandbox escape validation
+- Multi-tab orchestration and diagnostic telemetry
+- Background alarms and token refresh logic
 
 ## Related docs
 

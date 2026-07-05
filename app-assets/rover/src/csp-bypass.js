@@ -22,8 +22,15 @@ export function ruleIdForTab(tabId) {
 
 /**
  * A declarativeNetRequest session rule that removes the CSP response headers for
- * one tab's top-level and framed document loads. Pure (no chrome APIs) so it can
- * be unit-tested.
+ * one tab's top-level and framed document loads so Rover's runtime can make
+ * network requests (connect-src), load media (media-src), fonts (font-src), and
+ * spawn its module worker (worker-src) without being blocked by the page's
+ * policy. Pure (no chrome APIs) so it can be unit-tested.
+ *
+ * Why remove instead of append: the CSP spec intersects multiple directives of
+ * the same type, so appending a broader `connect-src` to a narrow one makes the
+ * policy *more* restrictive, not less. Removing the header entirely is the only
+ * reliable way to unblock Rover on strict sites.
  */
 export function buildCspRemovalRule(tabId) {
   return {

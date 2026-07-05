@@ -245,11 +245,9 @@ export function extractPreviewLaunchParams(urlString) {
 }
 
 function getHelperFragmentValue(rawHash) {
-  if (!rawHash || !rawHash.includes('=')) return '';
-  const params = new URLSearchParams(rawHash);
-  return String(
-    params.get(HELPER_PAYLOAD_FRAGMENT_PARAM) || '',
-  ).trim();
+  if (!rawHash || !rawHash.includes(HELPER_PAYLOAD_FRAGMENT_PARAM + '=')) return '';
+  const match = rawHash.match(new RegExp(`(?:[?&#]|\\b)${HELPER_PAYLOAD_FRAGMENT_PARAM}=([^&]+)`));
+  return match ? match[1].trim() : '';
 }
 
 export function hasHelperConfigFragment(urlString) {
@@ -284,10 +282,12 @@ export function stripPreviewLaunchParams(urlString) {
     url.searchParams.delete(PREVIEW_TOKEN_PARAM);
     url.searchParams.delete(PREVIEW_API_PARAM);
     const rawHash = String(url.hash || '').replace(/^#/, '').trim();
-    if (rawHash && rawHash.includes('=')) {
-      const params = new URLSearchParams(rawHash);
-      params.delete(HELPER_PAYLOAD_FRAGMENT_PARAM);
-      const nextHash = params.toString();
+    if (rawHash && rawHash.includes(HELPER_PAYLOAD_FRAGMENT_PARAM + '=')) {
+      const regex = new RegExp(`([?&]?)${HELPER_PAYLOAD_FRAGMENT_PARAM}=[^&]*(&?)`);
+      let nextHash = rawHash.replace(regex, (match, prefix, suffix) => {
+        return (prefix && suffix) ? prefix : '';
+      });
+      if (nextHash.startsWith('&')) nextHash = nextHash.slice(1);
       url.hash = nextHash ? nextHash : '';
     }
     return url.toString();
@@ -315,4 +315,64 @@ export function encodeHelperConfigFragment(config) {
     ? new TextEncoder().encode(json)
     : Uint8Array.from(Buffer.from(json, 'utf8'));
   return `${HELPER_PAYLOAD_FRAGMENT_PARAM}=${encodeBase64Url(bytes)}`;
+}
+
+/**
+ * Validate a raw config object and return an array of issues.
+ * Each issue is { level: 'error'|'warning'|'info', message: string }.
+ * An empty array means the config is valid.
+ *
+ * @param {object} cfg - Parsed JSON config object.
+ * @returns {Array<{level: string, message: string}>}
+ */
+export function validateConfigInput(cfg) {
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
+    return [{ level: 'error', message: 'Config must be a JSON object.' }];
+  }
+
+  const issues = [];
+
+  // Required: siteId
+  const siteId = String(cfg.siteId || '').trim();
+  if (!siteId) {
+    issues.push({ level: 'error', message: 'Missing required field: siteId' });
+  }
+
+  // Required: publicKey or sessionToken
+  const publicKey = String(cfg.publicKey || '').trim();
+  const sessionToken = String(cfg.sessionToken || '').trim();
+  if (!publicKey && !sessionToken) {
+    issues.push({ level: 'error', message: 'Need either publicKey or sessionToken' });
+  }
+
+  // Format checks (warnings, not errors — user may know what they're doing)
+  if (publicKey && !publicKey.startsWith('pk_')) {
+    issues.push({ level: 'warning', message: 'publicKey usually starts with "pk_"' });
+  }
+  if (sessionToken && !sessionToken.startsWith('rvrsess_') && !sessionToken.startsWith('rt_')) {
+    issues.push({ level: 'warning', message: 'sessionToken format looks unusual' });
+  }
+
+  // Structural checks
+  if (cfg.allowedDomains !== undefined && !Array.isArray(cfg.allowedDomains)) {
+    issues.push({ level: 'warning', message: 'allowedDomains should be an array' });
+  }
+  if (cfg.apiBase) {
+    try {
+      const parsed = new URL(String(cfg.apiBase));
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        issues.push({ level: 'warning', message: 'apiBase protocol should be http or https' });
+      }
+    } catch {
+      issues.push({ level: 'warning', message: 'apiBase is not a valid URL' });
+    }
+  }
+  if (cfg.domainScopeMode && !['host_only', 'registrable_domain'].includes(cfg.domainScopeMode)) {
+    issues.push({ level: 'warning', message: `Unknown domainScopeMode: "${cfg.domainScopeMode}"` });
+  }
+  if (cfg.mode && !['safe', 'full'].includes(cfg.mode)) {
+    issues.push({ level: 'warning', message: `Unknown mode: "${cfg.mode}"` });
+  }
+
+  return issues;
 }

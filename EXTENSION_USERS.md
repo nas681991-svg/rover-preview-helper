@@ -155,6 +155,15 @@ chrome.action.onClicked.addListener(async tab => {
 });
 ```
 
+## MV3 Service Worker Resilience & Token Management
+
+Manifest V3 service workers are transient and will be killed by the browser after periods of inactivity. To ensure your Rover integration remains stable:
+
+1. **State Storage**: Do not rely on global variables (`const state = {}`) in `background.js` to persist session data. Use `chrome.storage.session` (which stays in memory and survives worker restarts) to store active session IDs and tokens.
+2. **Ephemeral Maps**: If you must use global `Map` or `Set` objects for active connections, ensure you have an `onStartup` listener that cleans up stale entries and syncs with `chrome.storage.session`.
+3. **Token Auto-Refresh**: If you are using temporary hosted preview tokens instead of persistent Workspace keys, set up a `chrome.alarms` trigger to wake the service worker and refresh the token before it expires.
+4. **Telemetry**: Implement structured error logging using `chrome.storage.session` to track silent failures in background tasks that might occur when the popup is closed.
+
 ## Use Isolated Content Scripts for Your Own UI
 
 If you are adding your own extension UI or custom automation logic, keep most of it in an isolated content script. Use `world: "MAIN"` only for the small Rover boot bridge above.
