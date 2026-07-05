@@ -346,6 +346,295 @@ if (diagClear) {
   });
 }
 
+// ── Form Recorder ───────────────────────────────────────────────────────────
+const recorderStartBtn = document.getElementById('recorder-start');
+const recorderStopBtn = document.getElementById('recorder-stop');
+const recorderStatusBadge = document.getElementById('recorder-status');
+const recorderStats = document.getElementById('recorder-stats');
+const recorderFieldCount = document.getElementById('recorder-field-count');
+const recorderPageCount = document.getElementById('recorder-page-count');
+const recorderActions = document.getElementById('recorder-actions');
+const downloadCsvBtn = document.getElementById('recorder-download-csv');
+const uploadCsvInput = document.getElementById('recorder-upload-csv');
+const uploadPdfInput = document.getElementById('recorder-pdf-input');
+const replayProgress = document.getElementById('replay-progress');
+const progressFill = document.getElementById('progress-fill');
+const progressText = document.getElementById('progress-text');
+const replayPauseBtn = document.getElementById('replay-pause');
+const replayResumeBtn = document.getElementById('replay-resume');
+const replayCancelBtn = document.getElementById('replay-cancel');
+
+let currentFormMap = null;
+
+function setRecorderBadge(text, color) {
+  if (!recorderStatusBadge) return;
+  recorderStatusBadge.textContent = text;
+  recorderStatusBadge.style.background = color;
+}
+
+if (recorderStartBtn) {
+  recorderStartBtn.addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) { setStatus('No active tab.', true); return; }
+
+    setRecorderBadge('Starting…', '#666');
+    recorderStartBtn.disabled = true;
+
+    const result = await chrome.runtime.sendMessage({
+      type: 'FORM_RECORDER_START', tabId: tab.id,
+    });
+
+    if (result?.ok) {
+      setRecorderBadge('⏺ Recording', '#d63031');
+      recorderStopBtn.disabled = false;
+      if (recorderStats) recorderStats.style.display = 'flex';
+      if (recorderActions) recorderActions.style.display = 'none';
+      setStatus('Recording form interactions… Fill out the form, then click Stop.');
+    } else {
+      setRecorderBadge('Error', '#d63031');
+      recorderStartBtn.disabled = false;
+      setStatus(result?.error || 'Failed to start recording.', true);
+    }
+  });
+}
+
+if (recorderStopBtn) {
+  recorderStopBtn.addEventListener('click', async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) return;
+
+    const result = await chrome.runtime.sendMessage({
+      type: 'FORM_RECORDER_STOP', tabId: tab.id,
+    });
+
+    recorderStartBtn.disabled = false;
+    recorderStopBtn.disabled = true;
+
+    if (result?.ok && result.formMap) {
+      currentFormMap = result.formMap;
+      const fieldCount = result.formMap.fields?.length || 0;
+      const pageCount = result.formMap.totalPages || 1;
+
+      setRecorderBadge(`✓ ${fieldCount} fields`, '#00b894');
+      if (recorderFieldCount) recorderFieldCount.textContent = String(fieldCount);
+      if (recorderPageCount) recorderPageCount.textContent = String(pageCount);
+      if (recorderActions) recorderActions.style.display = 'flex';
+      setStatus(`Recorded ${fieldCount} fields across ${pageCount} page(s). Download the CSV template or upload data.`);
+    } else {
+      setRecorderBadge('Ready', 'var(--muted)');
+      setStatus(result?.error || 'No fields recorded.', true);
+    }
+  });
+}
+
+// CSV Template Download
+if (downloadCsvBtn) {
+  downloadCsvBtn.addEventListener('click', () => {
+    if (!currentFormMap) { setStatus('No recording to export.', true); return; }
+
+    const { fields = [], navActions = [], totalPages = 1 } = currentFormMap;
+    const pageGroups = [];
+    for (let p = 0; p < totalPages; p++) {
+      pageGroups.push(fields.filter(f => f.page === p));
+    }
+
+    const columns = [];
+    for (let p = 0; p < pageGroups.length; p++) {
+      for (const field of pageGroups[p]) {
+        const header = field.label || field.name ||
+          (field.name ? field.name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ') : null) ||
+          `Field ${columns.length + 1}`;
+        const selectorMeta = (field.selectorChain || []).join('|');
+        const coordsMeta = field.coords ? `coords:${field.coords.pageX},${field.coords.pageY}` : '';
+        columns.push({
+          header,
+          metadata: `selector:${selectorMeta};type:${field.fieldType}${coordsMeta ? ';' + coordsMeta : ''}`,
+          example: field.value ?? '',
+        });
+      }
+      if (p < pageGroups.length - 1) {
+        const nav = navActions.find(n => n.page === p);
+        columns.push({
+          header: `__NAV_${p + 1}__`,
+          metadata: `nav:click:${nav?.selector || ''};${nav?.coords ? `coords:${nav.coords.pageX},${nav.coords.pageY}` : ''}`.replace(/;$/, ''),
+          example: '',
+        });
+      }
+    }
+
+    const esc = v => {
+      const s = String(v ?? '');
+      return (s.includes('"') || s.includes(',') || s.includes('\n')) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [
+      columns.map(c => esc(c.header)).join(','),
+      '# ' + columns.map(c => esc(c.metadata)).join(','),
+      columns.map(c => esc(c.example)).join(','),
+      '',
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const name = `form-template-${currentFormMap.id || Date.now()}.csv`;
+    chrome.downloads.download({ url, filename: name, saveAs: true });
+    setStatus(`CSV template "${name}" ready for download.`);
+  });
+}
+
+// Filled CSV Upload → Bulk Replay
+if (uploadCsvInput) {
+  uploadCsvInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentFormMap) return;
+
+    const text = await file.text();
+    const tab = await getActiveTab();
+    if (!tab?.id) { setStatus('No active tab.', true); return; }
+
+    const parseRow = line => {
+      const fields = []; let cur = ''; let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQ) { if (ch === '"') { if (line[i+1] === '"') { cur += '"'; i++; } else inQ = false; } else cur += ch; }
+        else { if (ch === '"') inQ = true; else if (ch === ',') { fields.push(cur); cur = ''; } else cur += ch; }
+      }
+      fields.push(cur);
+      return fields;
+    };
+
+    const rawLines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+    if (rawLines.length < 2) { setStatus('CSV needs at least a header and one data row.', true); return; }
+
+    const cols = parseRow(rawLines[0]);
+    let dataStart = 1;
+    let metaLine = null;
+    if (rawLines[1]?.startsWith('# ')) { metaLine = rawLines[1].slice(2); dataStart = 2; }
+
+    const selectorMap = new Map();
+    const csvNavActions = [];
+    if (metaLine) {
+      const metaFields = parseRow(metaLine);
+      for (let i = 0; i < cols.length && i < metaFields.length; i++) {
+        const col = cols[i]; const meta = metaFields[i];
+        if (col.startsWith('__NAV_')) {
+          const nav = { column: col, index: i };
+          meta.split(';').forEach(p => {
+            if (p.startsWith('nav:click:')) nav.selector = p.slice(10);
+            if (p.startsWith('coords:')) { const [x,y] = p.slice(7).split(',').map(Number); nav.coords = {pageX:x,pageY:y}; }
+          });
+          csvNavActions.push(nav);
+        } else {
+          const fi = { column: col, index: i, selectorChain: [], fieldType: 'text', coords: null };
+          meta.split(';').forEach(p => {
+            if (p.startsWith('selector:')) fi.selectorChain = p.slice(9).split('|');
+            if (p.startsWith('type:')) fi.fieldType = p.slice(5);
+            if (p.startsWith('coords:')) { const [x,y] = p.slice(7).split(',').map(Number); fi.coords = {pageX:x,pageY:y}; }
+          });
+          selectorMap.set(col, fi);
+        }
+      }
+    }
+
+    const rows = [];
+    for (let i = dataStart; i < rawLines.length; i++) {
+      const vals = parseRow(rawLines[i]);
+      const row = {};
+      cols.forEach((c,j) => { row[c] = vals[j] ?? ''; });
+      rows.push(row);
+    }
+
+    setStatus(`Starting bulk fill: ${rows.length} rows…`);
+    if (replayProgress) replayProgress.style.display = 'block';
+    if (recorderActions) recorderActions.style.display = 'none';
+
+    chrome.runtime.sendMessage({
+      type: 'FORM_REPLAY_START',
+      tabId: tab.id,
+      formMapId: currentFormMap.id,
+      parsedCSV: { columns: cols, selectorMap: Object.fromEntries(selectorMap), rows, navActions: csvNavActions },
+    });
+  });
+}
+
+// PDF Upload → Extract → CSV
+if (uploadPdfInput) {
+  uploadPdfInput.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !currentFormMap) return;
+
+    setStatus('Extracting data from PDF(s)…');
+
+    for (const file of files) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const base64 = btoa(binary);
+
+      const csvColumns = (currentFormMap.fields || [])
+        .map(f => f.label || f.name || 'Field')
+        .filter(c => !c.startsWith('__NAV_'));
+
+      const result = await chrome.runtime.sendMessage({
+        type: 'FORM_RECORDER_PDF_EXTRACT',
+        pdfBase64: base64,
+        csvColumns,
+      });
+
+      if (result?.ok && result.rows?.length) {
+        setStatus(`Extracted ${result.rows.length} row(s) from PDF (${result.source}). Starting fill…`);
+        const tab = await getActiveTab();
+        if (!tab?.id) continue;
+
+        if (replayProgress) replayProgress.style.display = 'block';
+        chrome.runtime.sendMessage({
+          type: 'FORM_REPLAY_START', tabId: tab.id,
+          formMapId: currentFormMap.id,
+          parsedCSV: { columns: csvColumns, selectorMap: {}, rows: result.rows, navActions: [] },
+        });
+      } else {
+        setStatus(`PDF extraction failed: ${result?.error || 'Unknown'}`, true);
+      }
+    }
+  });
+}
+
+// Replay Progress Listener
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== 'FORM_REPLAY_PROGRESS') return;
+
+  const { currentRow, totalRows, status, lastStatus } = message;
+  const pct = totalRows > 0 ? Math.round((currentRow / totalRows) * 100) : 0;
+
+  if (progressFill) progressFill.style.width = `${pct}%`;
+  if (progressText) progressText.textContent = `${currentRow} / ${totalRows} rows (${lastStatus || status})`;
+
+  if (status === 'complete' || status === 'cancelled') {
+    setStatus(`Replay ${status}: ${currentRow}/${totalRows} rows processed.`);
+    if (replayProgress) setTimeout(() => { replayProgress.style.display = 'none'; }, 3000);
+    if (recorderActions) recorderActions.style.display = 'flex';
+  }
+
+  if (status === 'paused') {
+    if (replayPauseBtn) replayPauseBtn.style.display = 'none';
+    if (replayResumeBtn) replayResumeBtn.style.display = 'inline-block';
+  } else {
+    if (replayPauseBtn) replayPauseBtn.style.display = 'inline-block';
+    if (replayResumeBtn) replayResumeBtn.style.display = 'none';
+  }
+});
+
+if (replayPauseBtn) replayPauseBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'FORM_REPLAY_PAUSE' });
+});
+if (replayResumeBtn) replayResumeBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'FORM_REPLAY_RESUME' });
+});
+if (replayCancelBtn) replayCancelBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'FORM_REPLAY_CANCEL' });
+});
+
+// ── Init ────────────────────────────────────────────────────────────────────
 (async () => {
   try {
     const tab = await getActiveTab();
@@ -374,3 +663,4 @@ if (diagClear) {
     // Ignore initial load failures.
   }
 })();
+
