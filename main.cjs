@@ -98,7 +98,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     
     // Determine which extensions to update and load based on mode
     let targetSources = [];
-    if (mode === 'bugbug') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'Bugbug')];
+    if (mode === 'bugbug' || mode === 'all') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'Bugbug')];
     // 'rover', 'seleniumbase', and 'playwright-trace' don't need external downloads
 
     for (const ext of targetSources) {
@@ -110,7 +110,11 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     }
 
     let extensions = [];
-    if (mode === 'rover') {
+    if (mode === 'all') {
+      extensions.push(roverExtDir);
+      if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
+      if (fs.existsSync(sbaseExtDir)) extensions.push(sbaseExtDir);
+    } else if (mode === 'rover') {
       extensions = [roverExtDir];
     } else if (mode === 'bugbug') {
       if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
@@ -238,7 +242,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     } else if (mode === 'rover') {
       await page1.goto('https://rover.rtrvr.ai/login');
     } else {
-      await page1.goto('https://google.com'); 
+      await page1.goto('https://google.com');
     }
     
     await page1.bringToFront();
