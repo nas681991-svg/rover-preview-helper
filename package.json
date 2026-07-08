@@ -44,8 +44,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@playwright/mcp": "^0.0.77",
     "adm-zip": "^0.5.18",
-    "playwright-core": "^1.61.1"
+    "axe-core": "^4.12.1",
+    "playwright-core": "^1.61.1",
+    "rrweb": "^2.1.0"
   },
   "devDependencies": {
     "@rtrvr-ai/cli": "^0.2.1",

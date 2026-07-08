@@ -3,10 +3,14 @@ const path = require('path');
 const { chromium } = require('playwright-core');
 const fs = require('fs');
 const AdmZip = require('adm-zip');
+const { spawn } = require('child_process');
+const crypto = require('crypto');
 const isWin = process.platform === 'win32';
 
 const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
 const bugbugDir = path.join(extDataDir, 'bugbug');
+const fillappDir = path.join(extDataDir, 'fillapp');
+const cloudqaDir = path.join(extDataDir, 'cloudqa');
 
 const EXTENSION_SOURCES = [
   {
@@ -14,6 +18,20 @@ const EXTENSION_SOURCES = [
     url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc',
     destZip: () => path.join(extDataDir, 'bugbug.crx'),
     extractDir: bugbugDir,
+    isCrx: true,
+  },
+  {
+    name: 'CloudQA',
+    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Djndmknkiojkfghnndgndgmjmhkahiggo%26uc',
+    destZip: () => path.join(extDataDir, 'cloudqa.crx'),
+    extractDir: cloudqaDir,
+    isCrx: true,
+  },
+  {
+    name: 'FillApp',
+    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Dfillapp_placeholder_id%26uc',
+    destZip: () => path.join(extDataDir, 'fillapp.crx'),
+    extractDir: fillappDir,
     isCrx: true,
   }
 ];
@@ -24,18 +42,45 @@ const EXTENSION_SOURCES = [
  * Only writes if the Preferences file does not yet exist (avoids clobbering
  * an established profile where the user may have customised settings).
  */
-function preseedChromePreferences(userDataDir) {
+function computeExtensionId(extPath) {
+  const normalised = isWin ? extPath.toLowerCase().replace(/\\/g, '/') : extPath;
+  const hash = crypto.createHash('sha256').update(normalised, 'utf8').digest('hex');
+  const HEX_TO_CHROME = 'abcdefghijklmnop';
+  let id = '';
+  for (let i = 0; i < 32; i++) {
+    id += HEX_TO_CHROME[parseInt(hash[i], 16)];
+  }
+  return id;
+}
+
+function preseedChromePreferences(userDataDir, extensionPaths = []) {
   const defaultDir = path.join(userDataDir, 'Default');
   const prefsPath = path.join(defaultDir, 'Preferences');
-  if (fs.existsSync(prefsPath)) return;
-
-  const prefs = {
-    extensions: {
-      ui: { developer_mode: true }
-    }
-  };
-
   fs.mkdirSync(defaultDir, { recursive: true });
+
+  let prefs = {};
+  if (fs.existsSync(prefsPath)) {
+    try { prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf-8')); } catch (_) { prefs = {}; }
+  }
+
+  if (!prefs.extensions) prefs.extensions = {};
+  if (!prefs.extensions.ui) prefs.extensions.ui = {};
+  if (!prefs.extensions.settings) prefs.extensions.settings = {};
+
+  prefs.extensions.ui.developer_mode = true;
+
+  for (const extPath of extensionPaths) {
+    const id = computeExtensionId(extPath);
+    if (!prefs.extensions.settings[id]) prefs.extensions.settings[id] = {};
+    prefs.extensions.settings[id].incognito = true;
+  }
+
+  const KNOWN_IDS = ['oiedehaafceacbnnmindilfblafincjb']; // Bugbug
+  for (const id of KNOWN_IDS) {
+    if (!prefs.extensions.settings[id]) prefs.extensions.settings[id] = {};
+    prefs.extensions.settings[id].incognito = true;
+  }
+
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
 }
 
@@ -114,6 +159,8 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       extensions.push(roverExtDir);
       if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
       if (fs.existsSync(sbaseExtDir)) extensions.push(sbaseExtDir);
+      if (fs.existsSync(fillappDir)) extensions.push(fillappDir);
+      if (fs.existsSync(cloudqaDir)) extensions.push(cloudqaDir);
     } else if (mode === 'rover') {
       extensions = [roverExtDir];
     } else if (mode === 'bugbug') {
@@ -128,7 +175,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     fs.mkdirSync(myRecordsPath, { recursive: true });
 
     // Pre-seed Chrome profile so extensions launch with Developer Mode on.
-    preseedChromePreferences(userDataDir);
+    preseedChromePreferences(userDataDir, extensions);
 
     let context = null;
     let launchError = null;
@@ -186,6 +233,163 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       tracingStopped = true;
     };
 
+    // ── Full Interaction Telemetry & Advanced Logging ───────────────────
+    const ts = Date.now();
+    const networkStream = fs.createWriteStream(path.join(myRecordsPath, `network-log-${ts}.jsonl`), { flags: 'a' });
+    const consoleStream = fs.createWriteStream(path.join(myRecordsPath, `console-log-${ts}.jsonl`), { flags: 'a' });
+    const redirectStream = fs.createWriteStream(path.join(myRecordsPath, `redirects-${ts}.jsonl`), { flags: 'a' });
+    const iframeStream = fs.createWriteStream(path.join(myRecordsPath, `iframe-log-${ts}.jsonl`), { flags: 'a' });
+    const perfVitalsStream = fs.createWriteStream(path.join(myRecordsPath, `perf-vitals-${ts}.jsonl`), { flags: 'a' });
+    const resourceTimingStream = fs.createWriteStream(path.join(myRecordsPath, `resource-timing-${ts}.jsonl`), { flags: 'a' });
+    const domMutationsStream = fs.createWriteStream(path.join(myRecordsPath, `dom-mutations-${ts}.jsonl`), { flags: 'a' });
+    const sessionReplayStream = fs.createWriteStream(path.join(myRecordsPath, `session-replay-${ts}.json`), { flags: 'a' });
+    const a11yStream = fs.createWriteStream(path.join(myRecordsPath, `a11y-audit-${ts}.jsonl`), { flags: 'a' });
+
+    sessionReplayStream.write('['); // Start JSON array for rrweb
+
+    await context.exposeBinding('__advancedLogFlush', async (_source, batch) => {
+      if (!Array.isArray(batch) || batch.length === 0) return;
+      for (const evt of batch) {
+        if (evt.type === 'perf') perfVitalsStream.write(JSON.stringify(evt) + '\n');
+        else if (evt.type === 'resource') resourceTimingStream.write(JSON.stringify(evt) + '\n');
+        else if (evt.type === 'dom_mutation_summary') domMutationsStream.write(JSON.stringify(evt) + '\n');
+      }
+    });
+
+    await context.exposeBinding('__rrwebFlush', async (_source, batch) => {
+      if (!Array.isArray(batch) || batch.length === 0) return;
+      for (const evt of batch) {
+        sessionReplayStream.write(JSON.stringify(evt) + ',');
+      }
+    });
+
+    context.on('request', req => {
+      networkStream.write(JSON.stringify({ type: 'request', url: req.url(), method: req.method(), headers: req.headers(), ts: Date.now() }) + '\n');
+    });
+
+    context.on('response', async res => {
+      const status = res.status();
+      const req = res.request();
+      networkStream.write(JSON.stringify({
+        type: 'response', url: res.url(), status, timing: req.timing(), ts: Date.now()
+      }) + '\n');
+      if (status >= 300 && status < 400) {
+        redirectStream.write(JSON.stringify({ type: 'redirect', url: req.url(), status, redirectedTo: res.headers()['location'], ts: Date.now() }) + '\n');
+      }
+    });
+
+    context.on('console', msg => {
+      consoleStream.write(JSON.stringify({ type: 'console', text: msg.text(), typeOf: msg.type(), ts: Date.now() }) + '\n');
+    });
+
+    context.on('pageerror', error => {
+      consoleStream.write(JSON.stringify({ type: 'pageerror', message: error.message, stack: error.stack, ts: Date.now() }) + '\n');
+    });
+
+    context.on('frameattached', frame => {
+      iframeStream.write(JSON.stringify({ type: 'frameattached', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
+    });
+
+    context.on('framenavigated', frame => {
+      iframeStream.write(JSON.stringify({ type: 'framenavigated', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
+    });
+
+    const closeStreams = () => {
+      try { 
+        networkStream.end();
+        consoleStream.end();
+        redirectStream.end();
+        iframeStream.end();
+        perfVitalsStream.end();
+        resourceTimingStream.end();
+        domMutationsStream.end();
+        a11yStream.end();
+        sessionReplayStream.write('null]');
+        sessionReplayStream.end();
+      } catch (_) {}
+    };
+    context.on('close', closeStreams);
+
+    // Add rrweb dependency
+    await context.addInitScript({ path: path.join(__dirname, 'node_modules', 'rrweb', 'dist', 'rrweb.umd.min.cjs') });
+    
+    await context.addInitScript(() => {
+      // ── rrweb Session Replay ──────────────────────────────────────────
+      if (window.rrweb && !window.__rrwebStarted) {
+        window.__rrwebStarted = true;
+        const _rrwebBuffer = [];
+        window.rrweb.record({
+          emit(event) {
+            _rrwebBuffer.push(event);
+          }
+        });
+        setInterval(() => {
+          if (_rrwebBuffer.length > 0) {
+            try { window.__rrwebFlush(_rrwebBuffer.splice(0)); } catch (_) {}
+          }
+        }, 2000);
+      }
+
+      // ── Web Vitals & Performance Metrics ──────────────────────────────
+      if (!window.__perfStarted) {
+        window.__perfStarted = true;
+        const pushPerf = (type, metric) => {
+          try { window.__advancedLogFlush([{ type, ...metric, ts: Date.now() }]); } catch (_) {}
+        };
+
+        try {
+          const observer = new PerformanceObserver((list) => {
+            list.getEntries().forEach(entry => {
+              if (['paint', 'largest-contentful-paint', 'layout-shift', 'longtask'].includes(entry.entryType)) {
+                pushPerf('perf', { 
+                  entryType: entry.entryType, 
+                  name: entry.name, 
+                  startTime: entry.startTime, 
+                  duration: entry.duration,
+                  url: location.href 
+                });
+              } else if (entry.entryType === 'resource') {
+                pushPerf('resource', { 
+                  entryType: entry.entryType, 
+                  name: entry.name, 
+                  startTime: entry.startTime, 
+                  duration: entry.duration,
+                  url: location.href 
+                });
+              }
+            });
+          });
+          observer.observe({ entryTypes: ['paint', 'largest-contentful-paint', 'layout-shift', 'longtask', 'resource'] });
+        } catch (e) {}
+      }
+
+      // ── DOM Mutation Observer ─────────────────────────────────────────
+      if (!window.__domObserverStarted) {
+        window.__domObserverStarted = true;
+        let mutationsBatch = { added: 0, removed: 0, attrs: 0, chars: 0 };
+        const domObserver = new MutationObserver((mutations) => {
+          for (const m of mutations) {
+            if (m.type === 'childList') {
+              mutationsBatch.added += m.addedNodes.length;
+              mutationsBatch.removed += m.removedNodes.length;
+            } else if (m.type === 'attributes') {
+              mutationsBatch.attrs++;
+            } else if (m.type === 'characterData') {
+              mutationsBatch.chars++;
+            }
+          }
+        });
+        domObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+        
+        setInterval(() => {
+          if (mutationsBatch.added > 0 || mutationsBatch.removed > 0 || mutationsBatch.attrs > 0 || mutationsBatch.chars > 0) {
+            try { window.__advancedLogFlush([{ type: 'dom_mutation_summary', ...mutationsBatch, ts: Date.now(), url: location.href }]); } catch (_) {}
+            mutationsBatch = { added: 0, removed: 0, attrs: 0, chars: 0 };
+          }
+        }, 5000);
+      }
+    });
+
     // MV3 Keep-alive ping and SBase sync
     let globalSBaseState = {};
     await context.exposeBinding('syncSBaseState', async (source, state) => {
@@ -223,6 +427,15 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
           await stopTracing();
         }
       });
+      page.on('load', async () => {
+        try {
+          await page.addScriptTag({ path: path.join(__dirname, 'node_modules', 'axe-core', 'axe.js') });
+          const results = await page.evaluate(() => window.axe ? window.axe.run() : null);
+          if (results && results.violations && results.violations.length > 0) {
+            a11yStream.write(JSON.stringify({ type: 'a11y-audit', url: page.url(), violations: results.violations.map(v => ({ id: v.id, impact: v.impact, description: v.description, nodes: v.nodes.length })), ts: Date.now() }) + '\n');
+          }
+        } catch (e) {}
+      });
     };
 
     // Attach to existing pages
@@ -247,8 +460,25 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     
     await page1.bringToFront();
 
+    let mcpProcess = null;
+    if (mode === 'all') {
+      try {
+        const mcpCommand = isWin ? 'npx.cmd' : 'npx';
+        mcpProcess = spawn(mcpCommand, ['-y', '@playwright/mcp@latest'], {
+          stdio: 'ignore',
+          detached: true
+        });
+        mcpProcess.unref();
+      } catch (e) {
+        console.error('Failed to launch Playwright MCP:', e);
+      }
+    }
+
     // Wait for the browser to be closed by the user before reporting success.
     await new Promise(resolve => context.on('close', resolve));
+    if (mcpProcess) {
+      try { process.kill(isWin ? mcpProcess.pid : -mcpProcess.pid); } catch (_) {}
+    }
     await stopTracing();
     return 'success';
   } catch (error) {
