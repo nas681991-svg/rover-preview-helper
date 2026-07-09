@@ -229,7 +229,7 @@ export function captureField(el, value, coords = null) {
 
 /**
  * Try to resolve an element using a selectorChain (auto-healing).
- * Returns the first matching element.
+ * Returns the first matching element, piercing Shadow DOM boundaries.
  * @param {string[]} chain
  * @returns {Element|null}
  */
@@ -241,7 +241,7 @@ export function resolveSelector(chain) {
         const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
         if (result.singleNodeValue) return result.singleNodeValue;
       } else {
-        const el = document.querySelector(selector);
+        const el = querySelectorDeep(selector);
         if (el) return el;
       }
     } catch {
@@ -251,5 +251,25 @@ export function resolveSelector(chain) {
   return null;
 }
 
+function querySelectorDeep(selector, root = document) {
+  let el;
+  try {
+    el = root.querySelector(selector);
+    if (el) return el;
+  } catch {
+    return null;
+  }
+  
+  const iter = document.createNodeIterator(root, NodeFilter.SHOW_ELEMENT, null, false);
+  let node;
+  while ((node = iter.nextNode())) {
+    if (node.shadowRoot) {
+      const match = querySelectorDeep(selector, node.shadowRoot);
+      if (match) return match;
+    }
+  }
+  return null;
+}
+
 // Re-export utilities for testing
-export { isStableId, buildCssPath, buildXPath, findLabelText, detectFieldType };
+export { isStableId, buildCssPath, buildXPath, findLabelText, detectFieldType, querySelectorDeep };

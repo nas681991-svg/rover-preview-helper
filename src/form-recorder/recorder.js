@@ -6,6 +6,8 @@
  * service worker via chrome.runtime messaging.
  */
 import { captureField } from './selector-engine.js';
+import { labelFields } from './labeler.js';
+import { wizardState } from './wizard-state.js';
 
 const STORAGE_KEY = 'rover-form-recorder:fields';
 const NAV_STORAGE_KEY = 'rover-form-recorder:nav';
@@ -14,11 +16,7 @@ const META_KEY = 'rover-form-recorder:meta';
 /** @type {Map<string, Object>} field key -> field descriptor */
 const fieldMap = new Map();
 
-/** @type {Array<Object>} ordered list of navigation actions (wizard pages) */
-const navActions = [];
-
-/** @type {number} current wizard page index */
-let currentPage = 0;
+// Wizard state handles currentPage and navActions
 
 /** @type {boolean} whether the recorder is active */
 let recording = false;
@@ -80,10 +78,12 @@ function handleFieldInteraction(e) {
 
   const coords = { x: lastMouseX, y: lastMouseY };
   const descriptor = captureField(el, value, coords);
-  descriptor.page = currentPage;
+  descriptor.page = wizardState.currentPage;
 
   const key = fieldKey(el);
   fieldMap.set(key, descriptor);
+  
+  wizardState.recordInteraction(key, value);
 
   // Persist incrementally
   void persistFields();
@@ -103,9 +103,7 @@ function handlePossibleNavigation(e) {
 
   // Capture the navigation action with coordinates
   const rect = el.getBoundingClientRect();
-  navActions.push({
-    type: '__NAV__',
-    page: currentPage,
+  wizardState.recordNavigation({
     buttonText: (el.textContent || '').trim(),
     selector: el.id ? `#${el.id}` : buildQuickSelector(el),
     coords: {
@@ -113,11 +111,9 @@ function handlePossibleNavigation(e) {
       y: Math.round(rect.top + rect.height / 2),
       pageX: Math.round(rect.left + window.scrollX + rect.width / 2),
       pageY: Math.round(rect.top + window.scrollY + rect.height / 2),
-    },
-    timestamp: Date.now(),
+    }
   });
 
-  currentPage++;
   void persistFields();
 }
 
@@ -139,16 +135,29 @@ const observer = new MutationObserver(() => {
   mutationTimer = setTimeout(() => {
     // Auto-discover any new form fields that appeared
     const fields = document.querySelectorAll('input, select, textarea, [contenteditable="true"][role="textbox"]');
+    const newlyDiscovered = [];
+    
     fields.forEach(el => {
       if (!isFormField(el)) return;
       const key = fieldKey(el);
       if (fieldMap.has(key)) return; // already captured
       // Pre-capture with empty value (user hasn't interacted yet)
       const descriptor = captureField(el, '', null);
-      descriptor.page = currentPage;
+      descriptor.page = wizardState.currentPage;
       descriptor.autoDiscovered = true;
       fieldMap.set(key, descriptor);
+      newlyDiscovered.push({ key, descriptor });
     });
+    
+    if (newlyDiscovered.length > 0) {
+      const deps = wizardState.checkDependencies(newlyDiscovered);
+      for (const dep of deps) {
+        const field = fieldMap.get(dep.dependentField);
+        if (field) {
+          field.appearsWhen = dep.dependsOn;
+        }
+      }
+    }
     void persistFields();
   }, 1500); // 1.5s debounce for DOM stability
 });
@@ -160,12 +169,12 @@ async function persistFields() {
   try {
     await chrome.storage.session.set({
       [STORAGE_KEY]: fields,
-      [NAV_STORAGE_KEY]: navActions,
+      [NAV_STORAGE_KEY]: wizardState.navActions,
       [META_KEY]: {
         startUrl,
-        currentPage,
+        currentPage: wizardState.currentPage,
         fieldCount: fields.length,
-        navCount: navActions.length,
+        navCount: wizardState.navActions.length,
         recording,
         lastUpdated: Date.now(),
       },
@@ -182,9 +191,8 @@ export function startRecording() {
 
   recording = true;
   startUrl = location.href;
-  currentPage = 0;
+  wizardState.reset();
   fieldMap.clear();
-  navActions.length = 0;
 
   // Attach listeners
   document.addEventListener('mousemove', trackMouse, { passive: true });
@@ -201,7 +209,7 @@ export function startRecording() {
   existingFields.forEach(el => {
     if (!isFormField(el)) return;
     const descriptor = captureField(el, '', null);
-    descriptor.page = currentPage;
+    descriptor.page = wizardState.currentPage;
     descriptor.autoDiscovered = true;
     fieldMap.set(fieldKey(el), descriptor);
   });
@@ -210,7 +218,7 @@ export function startRecording() {
   return { ok: true, fieldCount: fieldMap.size };
 }
 
-export function stopRecording() {
+export async function stopRecording() {
   if (!recording) return { ok: false, reason: 'Not recording' };
 
   recording = false;
@@ -223,14 +231,20 @@ export function stopRecording() {
   document.removeEventListener('click', handlePossibleNavigation, { capture: true });
   observer.disconnect();
 
+  const rawFields = Array.from(fieldMap.values());
+  const labeledFields = await labelFields(rawFields);
+
+  fieldMap.clear();
+  labeledFields.forEach(f => fieldMap.set(f.selectorChain?.[0] || f.selector, f));
+
   void persistFields();
 
   return {
     ok: true,
-    fields: Array.from(fieldMap.values()),
-    navActions: [...navActions],
+    fields: labeledFields,
+    navActions: [...wizardState.navActions],
     startUrl,
-    totalPages: currentPage + 1,
+    totalPages: wizardState.currentPage + 1,
   };
 }
 
@@ -238,8 +252,8 @@ export function getRecordingState() {
   return {
     recording,
     fieldCount: fieldMap.size,
-    currentPage,
-    navCount: navActions.length,
+    currentPage: wizardState.currentPage,
+    navCount: wizardState.navActions.length,
     startUrl,
   };
 }
@@ -258,9 +272,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'FORM_RECORDER_STOP') {
-    const result = stopRecording();
-    sendResponse(result);
-    return;
+    stopRecording().then(sendResponse);
+    return true; // Indicate async response
   }
 
   if (message.type === 'FORM_RECORDER_STATUS') {

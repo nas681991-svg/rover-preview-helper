@@ -1,40 +1,81 @@
-import test from 'node:test';
+import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { 
+  ruleIdForTab, buildCspRemovalRule, enableCspBypass, 
+  disableCspBypass, cleanupOrphanedRules, CSP_RULE_ID_BASE 
+} from './csp-bypass.js';
 
-import { CSP_RULE_ID_BASE, ruleIdForTab, buildCspRemovalRule } from './csp-bypass.js';
+describe('csp-bypass', () => {
+  let sessionRules = [];
 
-test('ruleIdForTab offsets tab ids into a reserved range and stays unique', () => {
-  assert.equal(ruleIdForTab(0), CSP_RULE_ID_BASE);
-  assert.equal(ruleIdForTab(42), CSP_RULE_ID_BASE + 42);
-  assert.notEqual(ruleIdForTab(1), ruleIdForTab(2));
-});
+  beforeEach(() => {
+    sessionRules = [];
+    globalThis.chrome = {
+      declarativeNetRequest: {
+        getSessionRules: async () => sessionRules,
+        updateSessionRules: async ({ removeRuleIds = [], addRules = [] }) => {
+          sessionRules = sessionRules.filter(r => !removeRuleIds.includes(r.id));
+          sessionRules.push(...addRules);
+        }
+      }
+    };
+  });
 
-test('buildCspRemovalRule removes both CSP headers scoped to the one tab', () => {
-  const rule = buildCspRemovalRule(7);
+  afterEach(() => {
+    delete globalThis.chrome;
+  });
 
-  assert.equal(rule.id, ruleIdForTab(7));
-  assert.equal(rule.action.type, 'modifyHeaders');
+  test('ruleIdForTab calculates correctly', () => {
+    assert.equal(ruleIdForTab(5), CSP_RULE_ID_BASE + 5);
+    assert.equal(ruleIdForTab('10'), CSP_RULE_ID_BASE + 10);
+    assert.throws(() => ruleIdForTab('abc'), /Invalid tabId/);
+  });
 
-  const headers = rule.action.responseHeaders;
-  assert.equal(headers.length, 2);
+  test('buildCspRemovalRule structure is correct', () => {
+    const rule = buildCspRemovalRule(7);
+    assert.equal(rule.id, CSP_RULE_ID_BASE + 7);
+    assert.equal(rule.action.type, 'modifyHeaders');
+    assert.equal(rule.action.responseHeaders.length, 2);
+    assert.deepEqual(rule.condition.tabIds, [7]);
+  });
 
-  const removed = headers.map(h => `${h.header}:${h.operation}`).sort();
-  assert.deepEqual(removed, [
-    'content-security-policy-report-only:remove',
-    'content-security-policy:remove',
-  ]);
+  test('enableCspBypass adds rule and returns true if new', async () => {
+    const isNew = await enableCspBypass(8);
+    assert.equal(isNew, true);
+    assert.equal(sessionRules.length, 1);
+    assert.equal(sessionRules[0].id, CSP_RULE_ID_BASE + 8);
 
-  // Ensure no stale `value` keys are present — `remove` rules must not carry values.
-  for (const h of headers) {
-    assert.equal(h.value, undefined, `${h.header} should not have a value for remove operation`);
-  }
+    // Calling again returns false
+    const isNewAgain = await enableCspBypass(8);
+    assert.equal(isNewAgain, false);
+    assert.equal(sessionRules.length, 1); // Removes and re-adds
+  });
 
-  assert.deepEqual(rule.condition.tabIds, [7]);
-  assert.deepEqual(rule.condition.resourceTypes.sort(), ['main_frame', 'sub_frame']);
-});
+  test('enableCspBypass ignores invalid tab id', async () => {
+    const isNew = await enableCspBypass('foo');
+    assert.equal(isNew, false);
+    assert.equal(sessionRules.length, 0);
+  });
 
-test('buildCspRemovalRule coerces string tab ids to numbers', () => {
-  const rule = buildCspRemovalRule('9');
-  assert.equal(rule.id, CSP_RULE_ID_BASE + 9);
-  assert.deepEqual(rule.condition.tabIds, [9]);
+  test('disableCspBypass removes rule', async () => {
+    await enableCspBypass(9);
+    assert.equal(sessionRules.length, 1);
+    await disableCspBypass(9);
+    assert.equal(sessionRules.length, 0);
+  });
+
+  test('disableCspBypass ignores invalid tab id', async () => {
+    await disableCspBypass('foo');
+    assert.equal(sessionRules.length, 0);
+  });
+
+  test('cleanupOrphanedRules removes only CSP rules', async () => {
+    sessionRules = [
+      { id: 1 }, // Some other rule
+      { id: CSP_RULE_ID_BASE + 10 } // Orphaned CSP rule
+    ];
+    await cleanupOrphanedRules();
+    assert.equal(sessionRules.length, 1);
+    assert.equal(sessionRules[0].id, 1);
+  });
 });

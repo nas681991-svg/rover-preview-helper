@@ -11,6 +11,8 @@
 const REPLAY_STATE_KEY = 'rover-form-replay:state';
 const FORM_MAPS_KEY = 'rover-form-recorder:maps';
 
+import { locateFieldVisually } from './visual-fallback.js';
+
 // ── State Management ─────────────────────────────────────────────────────────
 
 async function getReplayState() {
@@ -91,10 +93,7 @@ async function fillField(tabId, fieldInfo, value) {
  * Used when selector-based filling fails.
  */
 async function fillFieldByCoordinates(tabId, fieldInfo, value) {
-  if (!fieldInfo.coords?.pageX || !fieldInfo.coords?.pageY) {
-    return { ok: false, method: 'coordinates', error: 'No coordinates recorded' };
-  }
-
+  // Try to use provided coords, but if missing we will fall back to visual
   try {
     // Attach debugger
     await chrome.debugger.attach({ tabId }, '1.3');
@@ -113,12 +112,24 @@ async function fillFieldByCoordinates(tabId, fieldInfo, value) {
           y: pageY - window.scrollY
         };
       },
-      args: [fieldInfo.coords.pageX, fieldInfo.coords.pageY]
+      args: [fieldInfo.coords?.pageX || 0, fieldInfo.coords?.pageY || 0]
     });
     
-    const { x, y } = scrollResult[0].result;
+    let { x, y } = scrollResult[0].result;
+    
+    // If we have no standard coords or it's a Canvas/Shadow DOM, try Rover Vision fallback
+    if (!fieldInfo.coords?.pageX) {
+      // Need to retrieve sessionToken from somewhere, mock empty for now
+      const bbox = await locateFieldVisually(tabId, fieldInfo.label || fieldInfo.name, { sessionToken: 'mock' });
+      if (bbox) {
+        x = bbox.x + bbox.width / 2;
+        y = bbox.y + bbox.height / 2;
+      } else {
+        throw new Error('Visual AI failed to locate field');
+      }
+    }
 
-    // Click at the recorded coordinates
+    // Click at the resolved coordinates
     await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
       type: 'mousePressed', x, y, button: 'left', clickCount: 1,
     });
@@ -339,8 +350,8 @@ export async function startReplay(tabId, formMap, parsedCSV) {
           // Try selector-based filling first
           let result = await fillField(tabId, field, csvValue);
 
-          // If selector failed, try coordinate-based
-          if (!result.ok && field.coords) {
+          // If selector failed, try coordinate-based or Visual fallback
+          if (!result.ok) {
             result = await fillFieldByCoordinates(tabId, field, csvValue);
           }
 

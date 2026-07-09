@@ -52,8 +52,8 @@ const {
 
 const {
   similarity,
-  findMatchingOption,
-} = await import('./replay-engine.js');
+  findBestMatch,
+} = await import('./fuzzy-matcher.js');
 
 // ── Test 3: Deliberate Data Corruption / CSV Fuzzing ─────────────────────────
 
@@ -121,7 +121,7 @@ test('parseCSV handles CR+LF line endings', () => {
 test('parseCSV parses metadata row into selectorMap and navActions', () => {
   const csv = [
     'First Name,Last Name,__NAV_1__,Country',
-    '# selector:#fname;type:text,selector:#lname;type:text,"nav:click:#next-btn;coords:500,300",selector:#country;type:select',
+    '"# selector:#fname;type:text;coords:10,20",selector:#lname;type:text,"nav:click:#next-btn;coords:500,300",selector:#country;type:select',
     'John,Doe,,United States',
   ].join('\n');
 
@@ -134,6 +134,8 @@ test('parseCSV parses metadata row into selectorMap and navActions', () => {
   assert.ok(fnameField, 'First Name field in selectorMap');
   assert.deepEqual(fnameField.selectorChain, ['#fname']);
   assert.equal(fnameField.fieldType, 'text');
+  assert.equal(fnameField.coords.pageX, 10);
+  assert.equal(fnameField.coords.pageY, 20);
 
   const countryField = result.selectorMap.get('Country');
   assert.ok(countryField, 'Country field in selectorMap');
@@ -207,70 +209,66 @@ test('similarity returns low score for completely different strings', () => {
   assert.ok(score < 0.5, `Expected < 0.5, got ${score}`);
 });
 
-// ── findMatchingOption (with mock select element) ────────────────────────────
+// ── findBestMatch ────────────────────────────────────────────────────────────
 
-function mockSelect(options) {
-  // Create a minimal mock of HTMLSelectElement.options
-  const opts = options.map(([value, text]) => ({ value, text, textContent: text }));
-  return { options: opts, tagName: 'SELECT' };
-}
-
-test('findMatchingOption finds exact value match', () => {
-  const el = mockSelect([['us', 'United States'], ['ca', 'Canada'], ['uk', 'United Kingdom']]);
-  const match = findMatchingOption(el, 'us');
-  assert.ok(match);
-  assert.equal(match.value, 'us');
+test('findBestMatch finds exact value match', () => {
+  const options = ['United States', 'Canada', 'United Kingdom'];
+  const result = findBestMatch('United States', options);
+  assert.ok(result);
+  assert.equal(result.match, 'United States');
+  assert.equal(result.type, 'exact');
 });
 
-test('findMatchingOption finds exact text match', () => {
-  const el = mockSelect([['us', 'United States'], ['ca', 'Canada']]);
-  const match = findMatchingOption(el, 'Canada');
-  assert.ok(match);
-  assert.equal(match.value, 'ca');
+test('findBestMatch finds case-insensitive match', () => {
+  const options = ['United States', 'Canada'];
+  const result = findBestMatch('UNITED STATES', options);
+  assert.ok(result);
+  assert.equal(result.match, 'United States');
+  assert.equal(result.type, 'exact');
 });
 
-test('findMatchingOption finds case-insensitive match', () => {
-  const el = mockSelect([['us', 'United States'], ['ca', 'Canada']]);
-  const match = findMatchingOption(el, 'UNITED STATES');
-  assert.ok(match);
-  assert.equal(match.value, 'us');
+test('findBestMatch finds includes match', () => {
+  const options = ['United States of America', 'Canada'];
+  const result = findBestMatch('United States', options);
+  assert.ok(result);
+  assert.equal(result.match, 'United States of America');
+  assert.equal(result.type, 'substring');
 });
 
-test('findMatchingOption finds includes match', () => {
-  const el = mockSelect([['us', 'United States of America'], ['ca', 'Canada']]);
-  const match = findMatchingOption(el, 'United States');
-  assert.ok(match);
-  assert.equal(match.value, 'us');
+test('findBestMatch fuzzy-matches misspelled "Untied States"', () => {
+  const options = ['United States', 'Canada', 'United Kingdom'];
+  const result = findBestMatch('Untied States', options);
+  assert.ok(result);
+  assert.equal(result.match, 'United States');
+  assert.equal(result.type, 'fuzzy');
 });
 
-test('findMatchingOption fuzzy-matches misspelled "Untied States"', () => {
-  const el = mockSelect([['us', 'United States'], ['ca', 'Canada'], ['uk', 'United Kingdom']]);
-  const match = findMatchingOption(el, 'Untied States');
-  assert.ok(match, 'Should find a fuzzy match for "Untied States"');
-  assert.equal(match.value, 'us');
+test('findBestMatch fuzzy-matches misspelled "Californa"', () => {
+  const options = ['California', 'Texas', 'New York', 'Florida'];
+  const result = findBestMatch('Californa', options);
+  assert.ok(result, 'Should find a fuzzy match for "Californa"');
+  assert.equal(result.match, 'California');
+  assert.equal(result.type, 'fuzzy');
 });
 
-test('findMatchingOption fuzzy-matches misspelled "Californa"', () => {
-  const el = mockSelect([
-    ['ca', 'California'], ['tx', 'Texas'], ['ny', 'New York'], ['fl', 'Florida'],
-  ]);
-  const match = findMatchingOption(el, 'Californa');
-  assert.ok(match, 'Should find a fuzzy match for "Californa"');
-  assert.equal(match.value, 'ca');
+test('findBestMatch returns null for completely unmatched value', () => {
+  const options = ['United States', 'Canada'];
+  const result = findBestMatch('Xyzzy Plugh', options);
+  assert.equal(result, null);
 });
 
-test('findMatchingOption returns null for completely unmatched value', () => {
-  const el = mockSelect([['us', 'United States'], ['ca', 'Canada']]);
-  const match = findMatchingOption(el, 'Xyzzy Plugh');
-  assert.equal(match, null);
+test('findBestMatch uses abbreviation dictionary', () => {
+  const options = ['United States', 'Canada'];
+  const result = findBestMatch('usa', options);
+  assert.ok(result);
+  assert.equal(result.match, 'United States');
+  assert.equal(result.type, 'abbreviation');
 });
 
-test('findMatchingOption handles empty target value gracefully', () => {
-  const el = mockSelect([['', '-- Select --'], ['us', 'United States']]);
-  const match = findMatchingOption(el, '');
-  // Empty string should match the empty-value placeholder option
-  assert.ok(match);
-  assert.equal(match.value, '');
+test('findBestMatch misses abbreviation if option not present', () => {
+  const options = ['Canada', 'Mexico'];
+  const result = findBestMatch('usa', options);
+  assert.strictEqual(result, null);
 });
 
 // ── Template Generation ──────────────────────────────────────────────────────

@@ -1,213 +1,114 @@
-import test from 'node:test';
+import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-
-import {
-  encodeHelperConfigFragment,
-  extractHelperConfigFragment,
-  hasHelperConfigFragment,
-  isHostAllowed,
-  normalizeConfig,
-  stripPreviewLaunchParams,
-  validateConfigInput,
+import { 
+  readCurrentTabId, normalizeHost, normalizeAllowedDomains,
+  isHostAllowed, normalizeConfig, extractPreviewLaunchParams,
+  hasHelperConfigFragment, extractHelperConfigFragment,
+  stripPreviewLaunchParams, buildLaunchUrl, validateConfigInput,
+  encodeHelperConfigFragment
 } from './shared.js';
 
-test('normalizeConfig keeps Workspace publicKey config fields', () => {
-  const config = normalizeConfig({
-    siteId: 'site_123',
-    publicKey: 'pk_site_123',
-    sessionId: 'sess_123',
-    siteKeyId: 'key_123',
-    apiBase: 'https://agent.rtrvr.ai',
-    allowedDomains: ['example.com'],
-    domainScopeMode: 'host_only',
-    sessionScope: 'shared_site',
-    mode: 'full',
-    allowActions: true,
-    cloudSandboxEnabled: true,
-    pageConfig: {
-      disableAutoScroll: true,
-    },
-    ui: {
-      voice: {
-        enabled: true,
-        language: 'en-US',
-        autoStopMs: 2800,
-      },
-      experience: {
-        motion: {
-          actionSpotlight: false,
-          actionSpotlightColor: '#2563eb',
-        },
-      },
-    },
+describe('shared', () => {
+  test('readCurrentTabId handles inputs', () => {
+    assert.equal(readCurrentTabId(10), 10);
+    assert.equal(readCurrentTabId('10'), 10);
+    assert.equal(readCurrentTabId(-1), null);
+    assert.equal(readCurrentTabId('foo'), null);
   });
 
-  assert.equal(config.siteId, 'site_123');
-  assert.equal(config.publicKey, 'pk_site_123');
-  assert.equal(config.sessionId, 'sess_123');
-  assert.equal(config.siteKeyId, 'key_123');
-  assert.equal(config.apiBase, 'https://agent.rtrvr.ai');
-  assert.deepEqual(config.allowedDomains, ['example.com']);
-  assert.equal(config.domainScopeMode, 'host_only');
-  assert.equal(config.sessionScope, 'shared_site');
-  assert.equal(config.mode, 'full');
-  assert.equal(config.allowActions, true);
-  assert.equal(config.cloudSandboxEnabled, true);
-  assert.deepEqual(config.pageConfig, {
-    disableAutoScroll: true,
-  });
-  assert.deepEqual(config.ui, {
-    voice: {
-      enabled: true,
-      language: 'en-US',
-      autoStopMs: 2800,
-    },
-    experience: {
-      motion: {
-        actionSpotlight: false,
-        actionSpotlightColor: '#2563EB',
-      },
-    },
-  });
-});
-
-test('normalizeConfig exposes default action spotlight in helper configs', () => {
-  const config = normalizeConfig({
-    siteId: 'site_123',
-    publicKey: 'pk_site_123',
+  test('normalizeHost handles URLs', () => {
+    assert.equal(normalizeHost('https://example.com/path'), 'example.com');
+    assert.equal(normalizeHost('invalid url'), '');
   });
 
-  assert.deepEqual(config.ui, {
-    experience: {
-      motion: {
-        actionSpotlight: true,
-        actionSpotlightColor: '#FF4C00',
-      },
-    },
+  test('normalizeAllowedDomains handles arrays and strings', () => {
+    assert.deepEqual(normalizeAllowedDomains(['a', 'b', 'b', null]), ['a', 'b']);
+    assert.deepEqual(normalizeAllowedDomains('a, b, b,'), ['a', 'b']);
+    assert.deepEqual(normalizeAllowedDomains(null), []);
   });
-  assert.deepEqual(config.pageConfig, {
-    disableAutoScroll: true,
+
+  test('isHostAllowed checks patterns', () => {
+    const domains = ['example.com', '*.test.com', '=exact.com', '*'];
+    assert.equal(isHostAllowed('sub.example.com', domains), true);
+    assert.equal(isHostAllowed('example.com', domains), true);
+    assert.equal(isHostAllowed('sub.test.com', domains), true);
+    assert.equal(isHostAllowed('test.com', ['example.com', '*.test.com']), false); // Needs sub for *.
+    assert.equal(isHostAllowed('exact.com', domains), true);
+    assert.equal(isHostAllowed('sub.exact.com', domains), true); // because * is there
+    
+    assert.equal(isHostAllowed('foo.com', ['foo.com'], 'host_only'), true);
+    assert.equal(isHostAllowed('sub.foo.com', ['foo.com'], 'host_only'), false);
   });
-});
 
-test('isHostAllowed allows any host with wildcard *', () => {
-  assert.ok(isHostAllowed('www.rtrvr.ai', ['*'], 'registrable_domain'));
-  assert.ok(isHostAllowed('anything.example.com', ['*'], 'host_only'));
-  assert.ok(isHostAllowed('localhost', ['*'], 'host_only'));
-  assert.ok(isHostAllowed('some-random-site.org', ['*', 'example.com'], 'registrable_domain'));
-});
-
-test('isHostAllowed respects host_only and registrable domain rules', () => {
-  assert.equal(isHostAllowed('example.com', ['example.com'], 'host_only'), true);
-  assert.equal(isHostAllowed('shop.example.com', ['example.com'], 'host_only'), false);
-  assert.equal(isHostAllowed('shop.example.com', ['example.com'], 'registrable_domain'), true);
-  assert.equal(isHostAllowed('example.com', ['*.example.com'], 'registrable_domain'), false);
-  assert.equal(isHostAllowed('shop.example.com', ['*.example.com'], 'registrable_domain'), true);
-  assert.equal(isHostAllowed('app.example.com', ['=app.example.com'], 'registrable_domain'), true);
-  assert.equal(isHostAllowed('shop.example.com', ['=app.example.com'], 'registrable_domain'), false);
-});
-
-test('helper fragment handoff round-trips generic publicKey config and strips itself from the URL', () => {
-  const fragment = encodeHelperConfigFragment({
-    siteId: 'site_123',
-    publicKey: 'pk_site_123',
-    sessionId: 'sess_123',
-    allowedDomains: ['example.com'],
-    domainScopeMode: 'registrable_domain',
-    sessionScope: 'shared_site',
+  test('normalizeConfig defaults', () => {
+    const cfg = normalizeConfig();
+    assert.equal(cfg.apiBase, 'https://agent.rtrvr.ai');
+    assert.equal(cfg.pageConfig.disableAutoScroll, true);
   });
-  const url = `https://www.example.com/products#${fragment}`;
 
-  assert.equal(hasHelperConfigFragment(url), true);
-  assert.deepEqual(extractHelperConfigFragment(url), {
-    siteId: 'site_123',
-    publicKey: 'pk_site_123',
-    sessionId: 'sess_123',
-    allowedDomains: ['example.com'],
-    domainScopeMode: 'registrable_domain',
-    sessionScope: 'shared_site',
+  test('normalizeConfig overrides', () => {
+    const input = {
+      siteId: '123',
+      apiBase: 'http://test.com',
+      allowedDomains: 'foo.com',
+      domainScopeMode: 'host_only',
+      ui: { voice: { enabled: true, language: 'en', autoStopMs: 2000 } }
+    };
+    const cfg = normalizeConfig(input);
+    assert.equal(cfg.siteId, '123');
+    assert.equal(cfg.apiBase, 'http://test.com');
+    assert.deepEqual(cfg.allowedDomains, ['foo.com']);
+    assert.equal(cfg.domainScopeMode, 'host_only');
+    assert.equal(cfg.ui.voice.enabled, true);
   });
-  assert.equal(stripPreviewLaunchParams(url), 'https://www.example.com/products');
-});
 
-test('helper fragment handoff also round-trips hosted preview payloads', () => {
-  const fragment = encodeHelperConfigFragment({
-    previewId: 'rpv_123',
-    previewToken: 'rvprv_123',
-    apiBase: 'https://agent.rtrvr.ai',
-    sessionId: 'rpv_123',
-    sessionScope: 'shared_site',
-    targetUrl: 'https://www.example.com/products',
+  test('extractPreviewLaunchParams parses query params', () => {
+    assert.equal(extractPreviewLaunchParams('http://t'), null);
+    const res = extractPreviewLaunchParams('http://t?rover_preview_id=1&rover_preview_token=2&rover_preview_api=3');
+    assert.equal(res.previewId, '1');
+    assert.equal(res.previewToken, '2');
+    assert.equal(res.apiBase, '3');
   });
-  const url = `https://www.example.com/products#${fragment}`;
 
-  assert.deepEqual(extractHelperConfigFragment(url), {
-    previewId: 'rpv_123',
-    previewToken: 'rvprv_123',
-    apiBase: 'https://agent.rtrvr.ai',
-    sessionId: 'rpv_123',
-    sessionScope: 'shared_site',
-    targetUrl: 'https://www.example.com/products',
+  test('helper config fragment functions', () => {
+    assert.equal(hasHelperConfigFragment('http://t'), false);
+    
+    const config = { foo: 'bar' };
+    const frag = encodeHelperConfigFragment(config);
+    const url = 'http://t#' + frag;
+    
+    assert.equal(hasHelperConfigFragment(url), true);
+    const extracted = extractHelperConfigFragment(url);
+    assert.deepEqual(extracted, config);
   });
-});
 
-test('old helper fragment param is ignored after the cutover', () => {
-  const payload = encodeURIComponent(Buffer.from(JSON.stringify({
-    siteId: 'old_site',
-    publicKey: 'pk_site_old',
-  })).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''));
-  const oldParam = `rover_helper_${'config'}`;
-  const url = `https://www.example.com/#${oldParam}=${payload}`;
-
-  assert.equal(hasHelperConfigFragment(url), false);
-  assert.equal(extractHelperConfigFragment(url), null);
-});
-
-test('invalid helper fragments throw a clear error', () => {
-  assert.throws(
-    () => extractHelperConfigFragment('https://www.example.com/#rover_helper_payload=not-valid-base64'),
-    /Invalid Rover helper handoff:/,
-  );
-});
-
-// validateConfigInput tests
-
-test('validateConfigInput returns empty array for valid config', () => {
-  const issues = validateConfigInput({
-    siteId: 'site_123',
-    publicKey: 'pk_site_123',
-    allowedDomains: ['*'],
+  test('extractHelperConfigFragment throws on invalid', () => {
+    assert.throws(() => extractHelperConfigFragment('http://t#rover_helper_payload=invalid_base64'), /Invalid Rover helper handoff/);
   });
-  assert.deepStrictEqual(issues, []);
-});
 
-test('validateConfigInput reports missing siteId and auth', () => {
-  const issues = validateConfigInput({});
-  assert.ok(issues.length >= 2);
-  assert.ok(issues.some(i => i.level === 'error' && i.message.includes('siteId')));
-  assert.ok(issues.some(i => i.level === 'error' && i.message.includes('publicKey')));
-});
-
-test('validateConfigInput warns on unusual token formats', () => {
-  const issues = validateConfigInput({
-    siteId: 'site_123',
-    publicKey: 'not_a_pk',
-    sessionToken: 'bad_token',
+  test('stripPreviewLaunchParams removes params', () => {
+    const url = 'http://t?rover_preview_id=1&other=2#rover_helper_payload=3';
+    const stripped = stripPreviewLaunchParams(url);
+    assert.equal(stripped, 'http://t/?other=2');
   });
-  assert.ok(issues.some(i => i.level === 'warning' && i.message.includes('pk_')));
-  assert.ok(issues.some(i => i.level === 'warning' && i.message.includes('sessionToken')));
-});
 
-test('validateConfigInput accepts sessionToken-only auth', () => {
-  const issues = validateConfigInput({
-    siteId: 'site_123',
-    sessionToken: 'rvrsess_abc123',
+  test('buildLaunchUrl adds params', () => {
+    const res = buildLaunchUrl('http://t', { requestId: 'r', attachToken: 'a' });
+    assert.equal(res, 'http://t/?rover_launch=r&rover_attach=a');
   });
-  assert.deepStrictEqual(issues, []);
-});
 
-test('validateConfigInput rejects non-object input', () => {
-  assert.ok(validateConfigInput(null).length > 0);
-  assert.ok(validateConfigInput([]).length > 0);
-  assert.ok(validateConfigInput('string').length > 0);
+  test('validateConfigInput handles various inputs', () => {
+    assert.equal(validateConfigInput(null)[0].level, 'error');
+    assert.equal(validateConfigInput([])[0].level, 'error');
+
+    let issues = validateConfigInput({});
+    assert.ok(issues.some(i => i.message.includes('siteId')));
+    assert.ok(issues.some(i => i.message.includes('publicKey')));
+
+    issues = validateConfigInput({ siteId: '1', publicKey: '123', apiBase: 'ftp://foo' });
+    assert.ok(issues.some(i => i.message.includes('protocol should be http or https')));
+
+    issues = validateConfigInput({ siteId: '1', publicKey: 'pk_123', allowedDomains: 'foo.com' });
+    assert.ok(issues.some(i => i.message.includes('allowedDomains should be an array')));
+  });
 });

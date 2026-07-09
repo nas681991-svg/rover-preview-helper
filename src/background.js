@@ -17,6 +17,8 @@ import {
   startReplay, pauseReplay, resumeReplay, cancelReplay, getReplayState,
 } from './form-recorder/replay-worker.js';
 import { extractFromPDF, extractFromMultiplePDFs } from './form-recorder/pdf-pipeline.js';
+import { startNetworkCapture, stopNetworkCapture } from './form-recorder/network-capture.js';
+import { generateOpenApiSpec } from './form-recorder/api-spec-generator.js';
 
 // Clean up stale CSP rules from previous sessions on every SW start.
 cleanupOrphanedRules();
@@ -638,6 +640,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           world: 'ISOLATED',
           files: ['src/form-recorder/recorder-bundle.js'],
         });
+        
+        // Start CDP network capture for API spec generation
+        void startNetworkCapture(tabId).catch(() => {});
+        
         const result = await chrome.tabs.sendMessage(tabId, { type: 'FORM_RECORDER_START' });
         try { sendResponse({ ok: true, ...result }); } catch { /* port closed */ }
       } catch (err) {
@@ -663,6 +669,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             fields: result.fields,
             navActions: result.navActions || [],
           };
+          
+          // Stop network capture and generate OpenAPI spec
+          try {
+            const capturedRequests = await stopNetworkCapture(tabId);
+            const apiSpec = generateOpenApiSpec(capturedRequests, formMap);
+            if (apiSpec) {
+              formMap.apiSpec = apiSpec;
+            }
+          } catch (e) {
+            console.error('Failed to generate API spec:', e);
+          }
+          
           const id = await saveFormMap(formMap);
           formMap.id = id;
           try { sendResponse({ ok: true, formMap }); } catch { /* port closed */ }

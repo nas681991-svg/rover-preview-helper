@@ -179,8 +179,8 @@ export function parseCSV(csvText) {
   let metadataLine = null;
   let dataStartIndex = 1;
 
-  if (lines[1].startsWith('# ')) {
-    metadataLine = lines[1].slice(2); // strip "# " prefix
+  if (lines.length > 1 && (lines[1].startsWith('#') || lines[1].startsWith('"#'))) {
+    metadataLine = lines[1];
     dataStartIndex = 2;
   }
 
@@ -192,7 +192,10 @@ export function parseCSV(csvText) {
     const metaFields = parseCSVRow(metadataLine);
     for (let i = 0; i < columns.length && i < metaFields.length; i++) {
       const col = columns[i];
-      const meta = metaFields[i];
+      let meta = metaFields[i];
+      if (i === 0 && meta.startsWith('# ')) {
+        meta = meta.slice(2);
+      }
 
       if (col.startsWith('__NAV_') && col.endsWith('__')) {
         // Navigation column

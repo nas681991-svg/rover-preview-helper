@@ -11,6 +11,9 @@
  *   2. Coordinate-based: fall back to CDP mouse events at recorded x/y
  */
 import { resolveSelector } from './selector-engine.js';
+import { findBestMatch } from './fuzzy-matcher.js';
+import { detectErrors as detectErrorsAdv } from './error-detector.js';
+import { requestHumanIntervention, detectCaptcha } from './confidence.js';
 
 // ── Typing Simulation ────────────────────────────────────────────────────────
 
@@ -44,67 +47,7 @@ async function simulateTyping(el, value) {
 }
 
 // ── Select Dropdown Handling ─────────────────────────────────────────────────
-
-function findMatchingOption(selectEl, targetValue) {
-  const target = String(targetValue).trim();
-  const options = Array.from(selectEl.options);
-
-  // 1. Exact value match
-  const exactValue = options.find(o => o.value === target);
-  if (exactValue) return exactValue;
-
-  // 2. Exact text match
-  const exactText = options.find(o => o.text.trim() === target);
-  if (exactText) return exactText;
-
-  // 3. Case-insensitive match
-  const lower = target.toLowerCase();
-  const caseInsensitive = options.find(o =>
-    o.value.toLowerCase() === lower || o.text.trim().toLowerCase() === lower
-  );
-  if (caseInsensitive) return caseInsensitive;
-
-  // 4. Includes match (e.g., "United States" matches "United States of America")
-  const includes = options.find(o =>
-    o.text.trim().toLowerCase().includes(lower) ||
-    lower.includes(o.text.trim().toLowerCase())
-  );
-  if (includes) return includes;
-
-  // 5. Levenshtein fuzzy match (threshold: 80% similarity)
-  let bestMatch = null;
-  let bestScore = 0;
-  for (const opt of options) {
-    const score = similarity(lower, opt.text.trim().toLowerCase());
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = opt;
-    }
-  }
-  if (bestScore >= 0.8) return bestMatch;
-
-  return null;
-}
-
-function similarity(a, b) {
-  if (a === b) return 1;
-  if (!a.length || !b.length) return 0;
-  const matrix = Array.from({ length: a.length + 1 }, (_, i) =>
-    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
-    }
-  }
-  const maxLen = Math.max(a.length, b.length);
-  return 1 - matrix[a.length][b.length] / maxLen;
-}
+// Now handled by fuzzy-matcher.js
 
 // ── Field Filling ────────────────────────────────────────────────────────────
 
@@ -121,10 +64,21 @@ async function fillFieldBySelector(fieldInfo, value) {
   try {
     switch (fieldType) {
       case 'select': {
-        const option = findMatchingOption(el, value);
-        if (!option) return { ok: false, method: 'selector', error: `No matching option for "${value}"` };
-        el.value = option.value;
-        dispatchInputEvents(el);
+        const optionsText = Array.from(el.options).map(o => o.text);
+        const matchResult = findBestMatch(String(value), optionsText, 0.8);
+        
+        if (!matchResult) {
+          await requestHumanIntervention(`Low confidence mapping for dropdown value "${value}". Please select the correct option manually.`, el);
+          return { ok: true, method: 'human' };
+        }
+        
+        const optionEl = Array.from(el.options).find(o => o.text === matchResult.match);
+        if (optionEl) {
+          el.value = optionEl.value;
+          dispatchInputEvents(el);
+        } else {
+          return { ok: false, method: 'selector', error: `No matching option for "${value}"` };
+        }
         break;
       }
       case 'checkbox': {
@@ -157,62 +111,7 @@ async function fillFieldBySelector(fieldInfo, value) {
 }
 
 // ── Error Detection ──────────────────────────────────────────────────────────
-
-function detectErrors() {
-  const errors = [];
-
-  // 1. role="alert" elements
-  document.querySelectorAll('[role="alert"]').forEach(el => {
-    const text = el.textContent.trim();
-    if (text) errors.push({ field: '', message: text });
-  });
-
-  // 2. .error, .field-error, .form-error elements
-  document.querySelectorAll('.error, .field-error, .form-error, .invalid-feedback').forEach(el => {
-    const text = el.textContent.trim();
-    if (text && text.length < 200) errors.push({ field: '', message: text });
-  });
-
-  // 3. aria-invalid inputs
-  document.querySelectorAll('[aria-invalid="true"]').forEach(el => {
-    const label = el.getAttribute('aria-label') || el.name || el.id || '';
-    // Try to find associated error message
-    const describedBy = el.getAttribute('aria-describedby');
-    let message = '';
-    if (describedBy) {
-      const ref = document.getElementById(describedBy);
-      if (ref) message = ref.textContent.trim();
-    }
-    if (!message) {
-      // Check next sibling for error text
-      const next = el.nextElementSibling;
-      if (next && (next.classList.contains('error') || next.classList.contains('invalid-feedback'))) {
-        message = next.textContent.trim();
-      }
-    }
-    if (message) errors.push({ field: label, message });
-  });
-
-  // 4. Red-bordered inputs (computed style check)
-  document.querySelectorAll('input, select, textarea').forEach(el => {
-    const style = window.getComputedStyle(el);
-    const borderColor = style.borderColor || '';
-    // Simple heuristic: check if border is reddish
-    if (/rgb\(2[0-2]\d|2[3-5][0-5]|[1-9]\d{0,1},\s*[0-5]?\d,\s*[0-5]?\d\)/.test(borderColor)) {
-      const label = el.getAttribute('aria-label') || el.name || el.id || '';
-      errors.push({ field: label, message: 'Validation error (red border)' });
-    }
-  });
-
-  // Deduplicate
-  const seen = new Set();
-  return errors.filter(e => {
-    const key = `${e.field}:${e.message}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
+// Handled by error-detector.js
 
 // ── DOM Stability Wait ───────────────────────────────────────────────────────
 
@@ -252,6 +151,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'FORM_FILL_FIELD') {
     void (async () => {
+      if (detectCaptcha()) {
+        await requestHumanIntervention('CAPTCHA detected. Please solve the CAPTCHA manually to resume the bulk run.');
+      }
       const result = await fillFieldBySelector(message.fieldInfo, message.value);
       sendResponse(result);
     })();
@@ -294,8 +196,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'FORM_DETECT_ERRORS') {
-    const errors = detectErrors();
-    sendResponse({ errors });
+    const errors = detectErrorsAdv();
+    // Return them formatted for the UI/CSV logging as `{ field: '', message: '' }` objects.
+    // detectErrorsAdv returns an array of strings like "Email: invalid", so let's map them.
+    const mappedErrors = errors.map(str => {
+      const [field, ...msgParts] = str.split(': ');
+      return { field: field, message: msgParts.join(': ') };
+    });
+    sendResponse({ errors: mappedErrors });
     return;
   }
 
@@ -309,4 +217,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 // Export for testing
-export { fillFieldBySelector, findMatchingOption, similarity, detectErrors, waitForDomStability };
+export { fillFieldBySelector, waitForDomStability };

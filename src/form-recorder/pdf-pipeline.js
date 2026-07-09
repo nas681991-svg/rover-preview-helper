@@ -238,7 +238,7 @@ function mapMindeeToSchema(invoiceData, csvColumns) {
   for (const [key, value] of Object.entries(invoiceData)) {
     if (typeof value === 'object' && !Array.isArray(value)) continue;
     if (Array.isArray(value)) continue;
-    flat[key.toLowerCase().replace(/[_\s-]+/g, ' ')] = String(value);
+    flat[key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().replace(/[_\s-]+/g, ' ')] = String(value);
   }
 
   for (const column of csvColumns) {

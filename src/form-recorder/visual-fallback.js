@@ -1,0 +1,114 @@
+/**
+ * Visual Fallback (Stage 8)
+ * Handles impenetrable DOM elements (Canvas, WebGL) by taking screenshots
+ * and sending them to Rover's Vision API to get bounding boxes.
+ */
+
+/**
+ * Capture a screenshot of the current tab and send to Vision API.
+ * Returns the detected bounding box of the input field.
+ * @param {number} tabId
+ * @param {string} fieldLabel
+ * @param {Object} roverConfig
+ * @returns {Promise<{x: number, y: number, width: number, height: number} | null>}
+ */
+export async function locateFieldVisually(tabId, fieldLabel, roverConfig) {
+  // 1. Capture the active tab
+  const dataUrl = await new Promise((resolve, reject) => {
+    chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 80 }, (data) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(data);
+      }
+    });
+  });
+
+  if (!dataUrl) return null;
+
+  // 2. Prepare the payload for Rover Vision API
+  const apiBase = roverConfig?.apiBase || 'https://agent.rtrvr.ai';
+  const sessionToken = roverConfig?.sessionToken;
+
+  if (!sessionToken) {
+    throw new Error('No session token available for Rover Vision API');
+  }
+
+  // 3. Call Rover Vision API to find the field bounding box
+  // Since we don't have the exact API endpoint docs, we will mock the request structure
+  // according to standard Vision API patterns for Rover.
+  
+  try {
+    const response = await fetch(`${apiBase}/v2/vision/locate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`
+      },
+      body: JSON.stringify({
+        image: dataUrl,
+        target: fieldLabel,
+        task: 'find_input_field'
+      })
+    });
+
+    if (!response.ok) {
+      console.warn('Vision API failed to locate field:', await response.text());
+      return null;
+    }
+
+    const json = await response.json();
+    if (json && json.boundingBox) {
+      // Expecting { x, y, width, height }
+      return json.boundingBox;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Error calling Vision API:', err);
+    return null;
+  }
+}
+
+/**
+ * Simulate a click via Chrome DevTools Protocol at the given coordinates.
+ * @param {number} tabId
+ * @param {number} x
+ * @param {number} y
+ */
+export async function dispatchCdpClick(tabId, x, y) {
+  const target = { tabId };
+  
+  // Attach debugger if not already attached
+  let attachedHere = false;
+  try {
+    await chrome.debugger.attach(target, '1.3');
+    attachedHere = true;
+  } catch (err) {
+    // Already attached is fine
+  }
+
+  try {
+    // Send Mouse Pressed
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      button: 'left',
+      clickCount: 1,
+      x: x,
+      y: y
+    });
+
+    // Send Mouse Released
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      button: 'left',
+      clickCount: 1,
+      x: x,
+      y: y
+    });
+  } finally {
+    if (attachedHere) {
+      await chrome.debugger.detach(target);
+    }
+  }
+}
