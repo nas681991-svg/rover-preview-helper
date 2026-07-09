@@ -42,8 +42,10 @@ export class WizardState {
    */
   checkDependencies(newFields) {
     const deps = [];
-    // If fields appeared within 2 seconds of an interaction, assume they are dependent.
-    if (this.lastInteraction && (Date.now() - this.lastInteraction.timestamp < 2000)) {
+    if (!Array.isArray(newFields)) return deps;
+
+    // If fields appeared within 5 seconds of an interaction, assume they are dependent.
+    if (this.lastInteraction && (Date.now() - this.lastInteraction.timestamp < 5000)) {
       for (const field of newFields) {
         deps.push({
           dependentField: field.key,

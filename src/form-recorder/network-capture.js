@@ -34,14 +34,16 @@ export async function startNetworkCapture(tabId) {
     if (method === 'Network.requestWillBeSent') {
       // Only capture XHR/Fetch POST/PUT requests
       if (['XHR', 'Fetch'].includes(params.type) && ['POST', 'PUT', 'PATCH'].includes(params.request.method)) {
-        requests.set(params.requestId, {
+        const req = {
           url: params.request.url,
           method: params.request.method,
           headers: params.request.headers,
           postData: params.request.postData,
           hasPostData: params.request.hasPostData,
           contentType: params.request.headers['Content-Type'] || params.request.headers['content-type'],
-        });
+        };
+        requests.set(params.requestId, req);
+        capturedRequests.push(req);
       }
     } else if (method === 'Network.responseReceived') {
       const req = requests.get(params.requestId);
@@ -56,7 +58,6 @@ export async function startNetworkCapture(tabId) {
         chrome.debugger.sendCommand(target, 'Network.getResponseBody', { requestId: params.requestId })
           .then(res => {
             req.responseBody = res.body;
-            capturedRequests.push(req);
           })
           .catch(() => { /* Body not available */ });
       }

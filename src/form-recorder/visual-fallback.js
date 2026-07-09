@@ -13,9 +13,12 @@
  * @returns {Promise<{x: number, y: number, width: number, height: number} | null>}
  */
 export async function locateFieldVisually(tabId, fieldLabel, roverConfig) {
-  // 1. Capture the active tab
+  // 1. Fetch the tab to get its windowId, then capture that specific window
+  const tab = await new Promise(resolve => chrome.tabs.get(tabId, resolve));
+  if (!tab || chrome.runtime.lastError) return null;
+
   const dataUrl = await new Promise((resolve, reject) => {
-    chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 80 }, (data) => {
+    chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 80 }, (data) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else {
@@ -54,7 +57,14 @@ export async function locateFieldVisually(tabId, fieldLabel, roverConfig) {
       return null;
     }
 
-    const json = await response.json();
+    let json = null;
+    try {
+      json = await response.json();
+    } catch {
+      console.warn('Vision API response was not valid JSON');
+      return null;
+    }
+
     if (json && json.boundingBox) {
       // Expecting { x, y, width, height }
       return json.boundingBox;

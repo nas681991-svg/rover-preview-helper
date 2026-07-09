@@ -114,7 +114,7 @@ export function detectErrors() {
   return errors.map(err => {
     let fieldName = 'Form';
     if (err.field) {
-      fieldName = err.field.name || err.field.id || err.field.getAttribute('aria-label') || 'Unknown Field';
+      fieldName = err.field.name || err.field.id || err.field?.getAttribute?.('aria-label') || 'Unknown Field';
     }
     return `${fieldName}: ${err.message}`;
   });

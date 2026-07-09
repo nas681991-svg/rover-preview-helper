@@ -16,8 +16,8 @@ function heuristicLabel(name) {
   // Insert space before capital letters (camelCase)
   clean = clean.replace(/([a-z])([A-Z])/g, '$1 $2');
   
-  // Capitalize words
-  return clean.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()).trim();
+  // Capitalize words and remove double spaces
+  return clean.replace(/\s+/g, ' ').replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()).trim();
 }
 
 /**
@@ -28,7 +28,7 @@ function heuristicLabel(name) {
  */
 export async function labelFields(fieldMap) {
   // If there are no fields, just return
-  if (!fieldMap || fieldMap.length === 0) return fieldMap;
+  if (!Array.isArray(fieldMap) || fieldMap.length === 0) return fieldMap;
 
   // Attempt to use Rover AI if available in the execution environment
   try {

@@ -41,8 +41,14 @@ export function generateOpenApiSpec(capturedRequests, formMap) {
 
   if (!submitReq) return null;
 
-  const url = new URL(submitReq.url);
-  const path = url.pathname;
+  let url;
+  let path = '/';
+  try {
+    url = new URL(submitReq.url);
+    path = url.pathname;
+  } catch {
+    url = { origin: 'http://localhost' };
+  }
   
   // Try to parse the request body
   let requestSchema = {};
@@ -73,11 +79,12 @@ export function generateOpenApiSpec(capturedRequests, formMap) {
     for (const field of formMap.fields) {
       const csvColumn = field.columnName || field.label || field.name;
       // Simple correlation: check if JSON body has a key that matches the field name
-      const camelName = field.name.replace(/_([a-z])/g, g => g[1].toUpperCase());
+      const safeName = field.name || '';
+      const camelName = safeName.replace(/_([a-z])/g, g => g[1].toUpperCase());
       
-      if (requestSchema.properties[field.name]) {
-        requestSchema.properties[field.name].description = `Mapped from CSV Column: ${csvColumn}`;
-      } else if (requestSchema.properties[camelName]) {
+      if (safeName && requestSchema.properties[safeName]) {
+        requestSchema.properties[safeName].description = `Mapped from CSV Column: ${csvColumn}`;
+      } else if (camelName && requestSchema.properties[camelName]) {
         requestSchema.properties[camelName].description = `Mapped from CSV Column: ${csvColumn}`;
       }
     }

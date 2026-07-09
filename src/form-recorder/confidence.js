@@ -49,13 +49,18 @@ export function requestHumanIntervention(message, targetField = null) {
       // Ignore if chrome.runtime is unavailable
     }
 
-    if (targetField) {
-      targetField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (targetField && targetField.style) {
+      try {
+        targetField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch {
+        // scrollIntoView might not exist on all SVG/custom nodes
+      }
       targetField.style.outline = '4px solid #ff4c00';
       targetField.style.outlineOffset = '2px';
       targetField.style.boxShadow = '0 0 15px rgba(255, 76, 0, 0.5)';
       
       // Pulse animation
+      if (targetField.animate) {
       targetField.animate([
         { outlineColor: '#ff4c00', boxShadow: '0 0 15px rgba(255, 76, 0, 0.5)' },
         { outlineColor: 'transparent', boxShadow: '0 0 0px transparent' },
@@ -64,6 +69,7 @@ export function requestHumanIntervention(message, targetField = null) {
         duration: 1500,
         iterations: Infinity
       });
+      }
     }
 
     // Build the overlay
@@ -114,11 +120,11 @@ export function requestHumanIntervention(message, targetField = null) {
 
     resumeBtn.onclick = () => {
       // Cleanup
-      if (targetField) {
+      if (targetField && targetField.style) {
         targetField.style.outline = '';
         targetField.style.outlineOffset = '';
         targetField.style.boxShadow = '';
-        targetField.getAnimations().forEach(a => a.cancel());
+        targetField.getAnimations?.().forEach(a => a.cancel());
       }
       interventionOverlay.remove();
       interventionOverlay = null;

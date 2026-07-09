@@ -10,6 +10,9 @@
 export function levenshteinDistance(a, b) {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
+  
+  // Prevent OOM from massive inputs (e.g. pasted text)
+  if (a.length > 500 || b.length > 500) return Math.max(a.length, b.length);
 
   const matrix = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
 
@@ -74,6 +77,7 @@ export function findBestMatch(target, options, threshold = 0.8) {
   
   // 1. Exact match
   for (const opt of options) {
+    if (!opt || opt.trim() === '') continue;
     if (opt.trim().toLowerCase() === cleanTarget) {
       return { match: opt, score: 1.0, type: 'exact' };
     }
@@ -83,6 +87,7 @@ export function findBestMatch(target, options, threshold = 0.8) {
   if (ABBREVIATIONS[cleanTarget]) {
     const fullForm = ABBREVIATIONS[cleanTarget];
     for (const opt of options) {
+      if (!opt || opt.trim() === '') continue;
       if (opt.trim().toLowerCase() === fullForm) {
         return { match: opt, score: 0.95, type: 'abbreviation' };
       }
@@ -91,6 +96,7 @@ export function findBestMatch(target, options, threshold = 0.8) {
 
   // 3. Includes / Substring match
   for (const opt of options) {
+    if (!opt || opt.trim() === '') continue;
     const cleanOpt = opt.trim().toLowerCase();
     if (cleanOpt.includes(cleanTarget) || cleanTarget.includes(cleanOpt)) {
       // Prioritize substring matches that are close in length
@@ -106,6 +112,7 @@ export function findBestMatch(target, options, threshold = 0.8) {
   let highestScore = 0;
 
   for (const opt of options) {
+    if (!opt || opt.trim() === '') continue;
     const score = similarity(cleanTarget, opt.trim().toLowerCase());
     if (score > highestScore) {
       highestScore = score;

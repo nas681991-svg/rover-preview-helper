@@ -31,7 +31,9 @@ export async function logDiagnostic(level, context, error) {
       entry.stack = String(error.stack).split('\n').slice(0, 4).join('\n');
     }
     const stored = await chrome.storage.session.get(DIAG_KEY);
-    const log = (stored[DIAG_KEY] || []).slice(-(MAX_ENTRIES - 1));
+    let log = stored[DIAG_KEY];
+    if (!Array.isArray(log)) log = [];
+    log = log.slice(-(MAX_ENTRIES - 1));
     log.push(entry);
     await chrome.storage.session.set({ [DIAG_KEY]: log });
   } catch {
@@ -46,7 +48,7 @@ export async function logDiagnostic(level, context, error) {
 export async function getDiagnostics() {
   try {
     const stored = await chrome.storage.session.get(DIAG_KEY);
-    return stored[DIAG_KEY] || [];
+    return Array.isArray(stored[DIAG_KEY]) ? stored[DIAG_KEY] : [];
   } catch {
     return [];
   }

@@ -20,7 +20,14 @@ function generateDescription(formMap) {
   const topFields = fieldNames.slice(0, 5).join(', ');
   const moreCount = fieldNames.length > 5 ? ` and ${fieldNames.length - 5} more fields` : '';
 
-  return `Fills out the form on ${new URL(formMap.startUrl).hostname}${pageStr}. It expects data including: ${topFields}${moreCount}.`;
+  let hostname = 'unknown host';
+  try {
+    hostname = new URL(formMap.startUrl).hostname;
+  } catch {
+    // startUrl might be invalid or missing
+  }
+
+  return `Fills out the form on ${hostname}${pageStr}. It expects data including: ${topFields}${moreCount}.`;
 }
 
 /**
@@ -74,16 +81,14 @@ export async function downloadSkill(formMap) {
   
   const filename = `${formMap.name || 'form'}.skill.json`.replace(/[^a-zA-Z0-9.\-_]/g, '_');
   
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+  const objectUrl = URL.createObjectURL(blob);
 
   await chrome.downloads.download({
-    url: base64,
+    url: objectUrl,
     filename: filename,
     saveAs: true
   });
+  
+  // Cleanup to avoid memory leaks
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
 }
