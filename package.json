@@ -65,8 +65,8 @@
     "patchright": "^1.61.1"
   },
   "pnpm": {
-    "approvedBuilds": [
-      "electron-winstaller"
+    "onlyBuiltDependencies": [
+      "*"
     ]
   }
 }
