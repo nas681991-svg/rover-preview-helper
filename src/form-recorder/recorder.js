@@ -39,8 +39,10 @@ function trackMouse(e) {
 // Generates a stable dedup key for a form element so we update (not duplicate)
 // fields when the user re-interacts with the same input.
 function fieldKey(el) {
-  if (el.id) return `id:${el.id}`;
-  if (el.name) return `name:${el.name}`;
+  const id = el.getAttribute('id');
+  const name = el.getAttribute('name');
+  if (id) return `id:${id}`;
+  if (name) return `name:${name}`;
   const path = [];
   let cur = el;
   while (cur && cur !== document.body) {
@@ -103,9 +105,10 @@ function handlePossibleNavigation(e) {
 
   // Capture the navigation action with coordinates
   const rect = el.getBoundingClientRect();
+  const id = el.getAttribute('id');
   wizardState.recordNavigation({
     buttonText: (el.textContent || '').trim(),
-    selector: el.id ? `#${el.id}` : buildQuickSelector(el),
+    selector: id ? `#${CSS.escape(id)}` : buildQuickSelector(el),
     coords: {
       x: Math.round(rect.left + rect.width / 2),
       y: Math.round(rect.top + rect.height / 2),
@@ -118,8 +121,10 @@ function handlePossibleNavigation(e) {
 }
 
 function buildQuickSelector(el) {
-  if (el.id) return `#${el.id}`;
-  if (el.name) return `[name="${el.name}"]`;
+  const id = el.getAttribute('id');
+  const name = el.getAttribute('name');
+  if (id) return `#${CSS.escape(id)}`;
+  if (name) return `[name="${CSS.escape(name)}"]`;
   const tag = el.tagName.toLowerCase();
   const text = (el.textContent || '').trim().slice(0, 30);
   if (text) return `${tag}:has-text("${text}")`;
@@ -129,37 +134,49 @@ function buildQuickSelector(el) {
 // ── DOM Mutation Observer ────────────────────────────────────────────────────
 // Watches for new form fields appearing (conditional logic, wizard pages).
 let mutationTimer = null;
-const observer = new MutationObserver(() => {
-  if (!recording) return;
-  clearTimeout(mutationTimer);
-  mutationTimer = setTimeout(() => {
-    // Auto-discover any new form fields that appeared
-    const fields = document.querySelectorAll('input, select, textarea, [contenteditable="true"][role="textbox"]');
-    const newlyDiscovered = [];
-    
-    fields.forEach(el => {
-      if (!isFormField(el)) return;
-      const key = fieldKey(el);
-      if (fieldMap.has(key)) return; // already captured
-      // Pre-capture with empty value (user hasn't interacted yet)
-      const descriptor = captureField(el, '', null);
-      descriptor.page = wizardState.currentPage;
-      descriptor.autoDiscovered = true;
-      fieldMap.set(key, descriptor);
-      newlyDiscovered.push({ key, descriptor });
-    });
-    
-    if (newlyDiscovered.length > 0) {
-      const deps = wizardState.checkDependencies(newlyDiscovered);
-      for (const dep of deps) {
-        const field = fieldMap.get(dep.dependentField);
-        if (field) {
-          field.appearsWhen = dep.dependsOn;
-        }
+let lastDiscoveryTime = 0;
+
+function runDiscovery() {
+  lastDiscoveryTime = Date.now();
+  // Auto-discover any new form fields that appeared
+  const fields = document.querySelectorAll('input, select, textarea, [contenteditable="true"][role="textbox"]');
+  const newlyDiscovered = [];
+  
+  fields.forEach(el => {
+    if (!isFormField(el)) return;
+    const key = fieldKey(el);
+    if (fieldMap.has(key)) return; // already captured
+    // Pre-capture with empty value (user hasn't interacted yet)
+    const descriptor = captureField(el, '', null);
+    descriptor.page = wizardState.currentPage;
+    descriptor.autoDiscovered = true;
+    fieldMap.set(key, descriptor);
+    newlyDiscovered.push({ key, descriptor });
+  });
+  
+  if (newlyDiscovered.length > 0) {
+    const deps = wizardState.checkDependencies(newlyDiscovered);
+    for (const dep of deps) {
+      const field = fieldMap.get(dep.dependentField);
+      if (field) {
+        field.appearsWhen = dep.dependsOn;
       }
     }
-    void persistFields();
-  }, 1500); // 1.5s debounce for DOM stability
+  }
+  void persistFields();
+}
+
+const observer = new MutationObserver(() => {
+  if (!recording) return;
+  const now = Date.now();
+  if (now - lastDiscoveryTime > 3000) {
+    // Force a run if continuous mutations have been starving the debounce
+    clearTimeout(mutationTimer);
+    runDiscovery();
+    return;
+  }
+  clearTimeout(mutationTimer);
+  mutationTimer = setTimeout(runDiscovery, 1500); // 1.5s debounce for DOM stability
 });
 
 // ── Persistence ──────────────────────────────────────────────────────────────
