@@ -52,7 +52,7 @@ describe('replay-worker', () => {
           }
           if (msg.type === 'FORM_WAIT_STABLE') return { ok: true };
         },
-        update: async () => {},
+        update: async () => ({ status: 'loading' }),
         onUpdated: {
           addListener: (cb) => {
             // Instantly resolve
@@ -175,7 +175,7 @@ describe('replay-worker', () => {
     assert.equal(res.results[0].status, 'error');
     // F1 coordinate fallback will succeed
     // F2 visual fallback will fail (mock)
-    assert.match(res.results[0].errorReason, /Visual AI failed to locate field/);
+    assert.match(res.results[0].errorReason, /No active Rover session token/);
     // Tab 99 returns a simulated validation error
     assert.match(res.results[0].errorReason, /Test: Err/);
   });

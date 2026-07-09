@@ -14,6 +14,7 @@ describe('visual-fallback', () => {
     globalThis.chrome = {
       runtime: { lastError: null },
       tabs: {
+        get: (tabId, cb) => cb({ windowId: tabId }),
         captureVisibleTab: (windowId, options, cb) => {
           if (windowId === 999) {
             globalThis.chrome.runtime.lastError = { message: 'Capture Error' };

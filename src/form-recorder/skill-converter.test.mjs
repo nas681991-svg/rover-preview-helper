@@ -32,6 +32,9 @@ describe('skill-converter', () => {
       constructor(url) {
         this.hostname = 'test.com';
       }
+      static createObjectURL(blob) {
+        return 'data:application/json;base64,mock';
+      }
     };
   });
 
@@ -82,7 +85,7 @@ describe('skill-converter', () => {
     globalThis.FileReader = class {
       readAsDataURL(blob) {
         setTimeout(() => {
-          this.onerror(new Error('FileReader Error'));
+          if (this.onerror) this.onerror({ target: { error: new Error('FileReader Error') } });
         }, 1);
       }
     };

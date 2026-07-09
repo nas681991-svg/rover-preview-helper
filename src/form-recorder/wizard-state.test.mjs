@@ -32,9 +32,9 @@ describe('WizardState', () => {
   test('ignores conditional dependencies after timeout', async () => {
     const ws = new WizardState();
     
-    // User interacts with "Country" 3 seconds ago
+    // User interacts with "Country" 6 seconds ago
     ws.recordInteraction('path:select[name="country"]', 'US');
-    ws.lastInteraction.timestamp = Date.now() - 3000;
+    ws.lastInteraction.timestamp = Date.now() - 6000;
     
     const newFields = [{ key: 'path:input[name="state"]' }];
     const deps = ws.checkDependencies(newFields);
