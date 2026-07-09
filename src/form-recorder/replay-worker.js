@@ -122,7 +122,7 @@ async function fillFieldByCoordinates(tabId, fieldInfo, value) {
       // Retrieve sessionToken and apiBase from tab state
       const tabStateKey = `rover-preview-helper:tab:${tabId}`;
       const tabStored = await chrome.storage.session.get(tabStateKey);
-      const config = tabStored[tabStateKey]?.config || {};
+      const config = tabStored[tabStateKey] || {};
       
       if (!config.sessionToken) {
         throw new Error('No active Rover session token found for visual fallback.');
@@ -341,9 +341,13 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
       if (fastMode && formMap.apiSpec) {
         try {
           const spec = formMap.apiSpec;
-          const endpointPath = Object.keys(spec.paths)[0];
-          const method = Object.keys(spec.paths[endpointPath])[0];
-          const targetUrl = spec.servers[0].url + endpointPath;
+          const endpointPath = spec?.paths ? Object.keys(spec.paths)[0] : null;
+          const method = endpointPath && spec.paths[endpointPath] ? Object.keys(spec.paths[endpointPath])[0] : null;
+          const targetUrl = (spec?.servers?.[0]?.url || '') + (endpointPath || '');
+          
+          if (!endpointPath || !method || !targetUrl) {
+            throw new Error("Incomplete API spec mapping.");
+          }
           
           // Build payload by mapping CSV values to field names
           const payload = {};
@@ -411,7 +415,21 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
                   fieldInfo: field
                 });
               } catch (e) {
-                // Ignore if content script is unavailable
+                // If it timed out waiting for human (message port closed)
+                state.status = 'paused';
+                await setReplayState(state);
+                broadcastProgress(state);
+                
+                // Wait for the user to explicitly resume via the popup
+                await new Promise(resolve => {
+                  const checkInterval = setInterval(async () => {
+                    const s = await getReplayState();
+                    if (!s || s.status !== 'paused') {
+                      clearInterval(checkInterval);
+                      resolve();
+                    }
+                  }, 1000);
+                });
               }
             }
 
