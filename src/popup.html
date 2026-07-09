@@ -69,14 +69,24 @@ or
             <span>Pages: <strong id="recorder-page-count">1</strong></span>
           </div>
           <div id="recorder-actions" class="recorder-actions" style="display:none;">
-            <button id="recorder-download-csv" class="secondary recorder-btn">📥 Download CSV Template</button>
-            <label class="upload-label recorder-btn secondary">
-              📤 Upload Filled CSV
-              <input type="file" id="recorder-upload-csv" accept=".csv" style="display:none;" />
-            </label>
-            <label class="upload-label recorder-btn secondary">
-              📄 Upload PDF → CSV
-              <input type="file" id="recorder-pdf-input" accept=".pdf" multiple style="display:none;" />
+            <div style="display:flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+              <button id="recorder-download-csv" class="secondary recorder-btn">📥 Download CSV Template</button>
+              <button id="recorder-download-api" class="secondary recorder-btn" style="display:none;">📥 Download API Spec</button>
+              <button id="recorder-download-skill" class="secondary recorder-btn">📥 Download Skill</button>
+            </div>
+            <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+              <label class="upload-label recorder-btn secondary">
+                📤 Upload Filled CSV
+                <input type="file" id="recorder-upload-csv" accept=".csv" style="display:none;" />
+              </label>
+              <label class="upload-label recorder-btn secondary">
+                📄 Upload PDF → CSV
+                <input type="file" id="recorder-pdf-input" accept=".pdf" multiple style="display:none;" />
+              </label>
+            </div>
+            <label class="fast-mode-toggle" style="display:none; align-items:center; gap:6px; margin-top:8px; font-size:13px; cursor:pointer;" id="fast-mode-container">
+              <input type="checkbox" id="fast-mode-checkbox" checked />
+              ⚡ Fast Mode (Bypass UI via API)
             </label>
           </div>
           <div id="replay-progress" class="replay-progress" style="display:none;">

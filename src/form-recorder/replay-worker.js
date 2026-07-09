@@ -119,8 +119,19 @@ async function fillFieldByCoordinates(tabId, fieldInfo, value) {
     
     // If we have no standard coords or it's a Canvas/Shadow DOM, try Rover Vision fallback
     if (!fieldInfo.coords?.pageX) {
-      // Need to retrieve sessionToken from somewhere, mock empty for now
-      const bbox = await locateFieldVisually(tabId, fieldInfo.label || fieldInfo.name, { sessionToken: 'mock' });
+      // Retrieve sessionToken and apiBase from tab state
+      const tabStateKey = `rover-preview-helper:tab:${tabId}`;
+      const tabStored = await chrome.storage.session.get(tabStateKey);
+      const config = tabStored[tabStateKey]?.config || {};
+      
+      if (!config.sessionToken) {
+        throw new Error('No active Rover session token found for visual fallback.');
+      }
+      
+      const bbox = await locateFieldVisually(tabId, fieldInfo.label || fieldInfo.name, { 
+        sessionToken: config.sessionToken,
+        apiBase: config.apiBase || 'https://agent.rtrvr.ai'
+      });
       if (bbox) {
         x = bbox.x + bbox.width / 2;
         y = bbox.y + bbox.height / 2;
@@ -255,7 +266,7 @@ function broadcastProgress(state) {
  * @param {Object} formMap - The recorded form map
  * @param {Object} parsedCSV - Output from csv-engine.parseCSV()
  */
-export async function startReplay(tabId, formMap, parsedCSV) {
+export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
   const { columns, selectorMap, rows, navActions } = parsedCSV;
 
   const state = {
@@ -306,80 +317,126 @@ export async function startReplay(tabId, formMap, parsedCSV) {
     let rowError = '';
 
     try {
-      // Navigate to start URL
-      await chrome.tabs.update(tabId, { url: formMap.startUrl });
-      // Wait for page to load
-      await new Promise(resolve => {
-        const listener = (updatedTabId, changeInfo) => {
-          if (updatedTabId === tabId && changeInfo.status === 'complete') {
+      // Navigate to start URL (if not in Fast Mode)
+      if (!fastMode || !formMap.apiSpec) {
+        await chrome.tabs.update(tabId, { url: formMap.startUrl });
+        // Wait for page to load
+        await new Promise(resolve => {
+          const listener = (updatedTabId, changeInfo) => {
+            if (updatedTabId === tabId && changeInfo.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+          // Safety timeout
+          setTimeout(() => {
             chrome.tabs.onUpdated.removeListener(listener);
             resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-        // Safety timeout
-        setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }, 15000);
-      });
-
-      // Inject replay engine
-      await injectReplayEngine(tabId);
-      await waitForStability(tabId);
-
-      // Group fields by page using the form map
-      const fieldsByPage = new Map();
-      for (const field of formMap.fields) {
-        const page = field.page || 0;
-        if (!fieldsByPage.has(page)) fieldsByPage.set(page, []);
-        fieldsByPage.get(page).push(field);
-      }
-      const totalPages = formMap.totalPages || 1;
-
-      for (let page = 0; page < totalPages; page++) {
-        const pageFields = fieldsByPage.get(page) || [];
-
-        // Fill each field on this page
-        for (const field of pageFields) {
-          // Find the matching column in the CSV
-          const columnName = field.label || field.name || '';
-          const csvValue = row[columnName];
-          if (csvValue === undefined || csvValue === '') continue;
-
-          // Try selector-based filling first
-          let result = await fillField(tabId, field, csvValue);
-
-          // If selector failed, try coordinate-based or Visual fallback
-          if (!result.ok) {
-            result = await fillFieldByCoordinates(tabId, field, csvValue);
-          }
-
-          if (!result.ok) {
-            rowError += `${columnName}: ${result.error || 'fill failed'}; `;
-          }
-
-          // Small delay between fields for stability
-          await new Promise(r => setTimeout(r, 150));
-        }
-
-        // Click navigation button if not on the last page
-        if (page < totalPages - 1) {
-          const nav = (formMap.navActions || []).find(n => n.page === page);
-          if (nav) {
-            await clickNavigation(tabId, nav);
-            // Re-inject replay engine after page transition
-            await injectReplayEngine(tabId);
-            await waitForStability(tabId);
-          }
-        }
+          }, 15000);
+        });
       }
 
-      // After filling all pages, check for errors
-      const errors = await detectErrors(tabId);
-      if (errors.length > 0) {
-        rowStatus = 'error';
-        rowError += errors.map(e => `${e.field}: ${e.message}`).join('; ');
+      // Fast Mode API Bypass
+      if (fastMode && formMap.apiSpec) {
+        try {
+          const spec = formMap.apiSpec;
+          const endpointPath = Object.keys(spec.paths)[0];
+          const method = Object.keys(spec.paths[endpointPath])[0];
+          const targetUrl = spec.servers[0].url + endpointPath;
+          
+          // Build payload by mapping CSV values to field names
+          const payload = {};
+          for (const field of formMap.fields) {
+            const columnName = field.label || field.name || '';
+            if (row[columnName] !== undefined && row[columnName] !== '') {
+              payload[field.name] = row[columnName];
+            }
+          }
+          
+          const response = await fetch(targetUrl, {
+            method: method.toUpperCase(),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          
+          if (!response.ok) {
+            rowStatus = 'error';
+            rowError = `API Error: ${response.status} ${response.statusText}`;
+          }
+        } catch (err) {
+          rowStatus = 'error';
+          rowError = `API Request failed: ${err.message}`;
+        }
+      } else {
+        // --- Standard UI DOM Filling (Fallback) ---
+        // Inject replay engine
+        await injectReplayEngine(tabId);
+        await waitForStability(tabId);
+
+        // Group fields by page using the form map
+        const fieldsByPage = new Map();
+        for (const field of formMap.fields) {
+          const page = field.page || 0;
+          if (!fieldsByPage.has(page)) fieldsByPage.set(page, []);
+          fieldsByPage.get(page).push(field);
+        }
+        const totalPages = formMap.totalPages || 1;
+
+        for (let page = 0; page < totalPages; page++) {
+          const pageFields = fieldsByPage.get(page) || [];
+
+          // Fill each field on this page
+          for (const field of pageFields) {
+            // Find the matching column in the CSV
+            const columnName = field.label || field.name || '';
+            const csvValue = row[columnName];
+            if (csvValue === undefined || csvValue === '') continue;
+
+            // Try selector-based filling first
+            let result = await fillField(tabId, field, csvValue);
+
+            // If selector failed, try coordinate-based or Visual fallback
+            if (!result.ok) {
+              result = await fillFieldByCoordinates(tabId, field, csvValue);
+            }
+
+            if (!result.ok) {
+              rowError += `${columnName}: ${result.error || 'fill failed'}; `;
+              // Stage 9: Trigger Human-in-the-Loop
+              try {
+                await chrome.tabs.sendMessage(tabId, {
+                  type: 'FORM_REQUEST_INTERVENTION',
+                  message: `Failed to autofill "${columnName}" (${result.error}). Please fill it manually and click Resume.`,
+                  fieldInfo: field
+                });
+              } catch (e) {
+                // Ignore if content script is unavailable
+              }
+            }
+
+            // Small delay between fields for stability
+            await new Promise(r => setTimeout(r, 150));
+          }
+
+          // Click navigation button if not on the last page
+          if (page < totalPages - 1) {
+            const nav = (formMap.navActions || []).find(n => n.page === page);
+            if (nav) {
+              await clickNavigation(tabId, nav);
+              // Re-inject replay engine after page transition
+              await injectReplayEngine(tabId);
+              await waitForStability(tabId);
+            }
+          }
+        }
+
+        // After filling all pages, check for errors
+        const errors = await detectErrors(tabId);
+        if (errors.length > 0) {
+          rowStatus = 'error';
+          rowError += errors.map(e => `${e.field}: ${e.message}`).join('; ');
+        }
       }
 
     } catch (err) {

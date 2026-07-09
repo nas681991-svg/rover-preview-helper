@@ -1,5 +1,6 @@
 import { normalizeConfig, validateConfigInput, STORAGE_KEY_PREFIX, STATUS_KEY_PREFIX } from './shared.js';
 import { generateTemplate, parseCSV } from './form-recorder/csv-engine.js';
+import { downloadSkill } from './form-recorder/skill-converter.js';
 
 const configEl = document.getElementById('config');
 const statusEl = document.getElementById('status');
@@ -356,6 +357,9 @@ const recorderFieldCount = document.getElementById('recorder-field-count');
 const recorderPageCount = document.getElementById('recorder-page-count');
 const recorderActions = document.getElementById('recorder-actions');
 const downloadCsvBtn = document.getElementById('recorder-download-csv');
+const downloadApiBtn = document.getElementById('recorder-download-api');
+const fastModeContainer = document.getElementById('fast-mode-container');
+const fastModeCheckbox = document.getElementById('fast-mode-checkbox');
 const uploadCsvInput = document.getElementById('recorder-upload-csv');
 const uploadPdfInput = document.getElementById('recorder-pdf-input');
 const replayProgress = document.getElementById('replay-progress');
@@ -420,6 +424,15 @@ if (recorderStopBtn) {
       if (recorderFieldCount) recorderFieldCount.textContent = String(fieldCount);
       if (recorderPageCount) recorderPageCount.textContent = String(pageCount);
       if (recorderActions) recorderActions.style.display = 'flex';
+      
+      if (currentFormMap.apiSpec) {
+        if (downloadApiBtn) downloadApiBtn.style.display = 'inline-block';
+        if (fastModeContainer) fastModeContainer.style.display = 'flex';
+      } else {
+        if (downloadApiBtn) downloadApiBtn.style.display = 'none';
+        if (fastModeContainer) fastModeContainer.style.display = 'none';
+      }
+      
       setStatus(`Recorded ${fieldCount} fields across ${pageCount} page(s). Download the CSV template or upload data.`);
     } else {
       setRecorderBadge('Ready', 'var(--muted)');
@@ -439,6 +452,21 @@ if (downloadCsvBtn) {
     const name = `form-template-${currentFormMap.id || Date.now()}.csv`;
     chrome.downloads.download({ url, filename: name, saveAs: true });
     setStatus(`CSV template "${name}" ready for download.`);
+  });
+}
+
+// API Spec Download
+if (downloadApiBtn) {
+  downloadApiBtn.addEventListener('click', () => {
+    if (!currentFormMap || !currentFormMap.apiSpec) { setStatus('No API spec to export.', true); return; }
+    
+    // Quick YAML stringification for the OpenAPI spec
+    const yaml = JSON.stringify(currentFormMap.apiSpec, null, 2);
+    const blob = new Blob([yaml], { type: 'application/x-yaml' });
+    const url = URL.createObjectURL(blob);
+    const name = `form-api-spec-${currentFormMap.id || Date.now()}.yaml`;
+    chrome.downloads.download({ url, filename: name, saveAs: true });
+    setStatus(`API Spec "${name}" ready for download.`);
   });
 }
 
@@ -468,6 +496,7 @@ if (uploadCsvInput) {
       type: 'FORM_REPLAY_START',
       tabId: tab.id,
       formMapId: currentFormMap.id,
+      fastMode: fastModeCheckbox && fastModeCheckbox.checked,
       parsedCSV: {
         columns: parsed.columns,
         selectorMap: Object.fromEntries(parsed.selectorMap),

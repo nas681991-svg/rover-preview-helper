@@ -726,7 +726,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         try { sendResponse({ ok: true, status: 'started' }); } catch { /* port closed */ }
         // Run replay in the background (don't await — it's long-running)
-        startReplay(tabId, formMap, message.parsedCSV).catch(err => {
+        startReplay(tabId, formMap, message.parsedCSV, message.fastMode).catch(err => {
           void logDiagnostic('error', 'replay', err);
         });
       } catch (err) {

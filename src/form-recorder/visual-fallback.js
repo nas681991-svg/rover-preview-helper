@@ -35,9 +35,6 @@ export async function locateFieldVisually(tabId, fieldLabel, roverConfig) {
   }
 
   // 3. Call Rover Vision API to find the field bounding box
-  // Since we don't have the exact API endpoint docs, we will mock the request structure
-  // according to standard Vision API patterns for Rover.
-  
   try {
     const response = await fetch(`${apiBase}/v2/vision/locate`, {
       method: 'POST',

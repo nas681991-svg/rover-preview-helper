@@ -214,6 +214,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     return true;
   }
+
+  if (message.type === 'FORM_REQUEST_INTERVENTION') {
+    void (async () => {
+      // Find the element if a selector was provided (for highlighting)
+      let el = null;
+      if (message.fieldInfo?.selectorChain) {
+        el = resolveSelector(message.fieldInfo.selectorChain);
+      }
+      await requestHumanIntervention(message.message, el);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
 });
 
 // Export for testing
