@@ -26,7 +26,10 @@ jobs:
         uses: pnpm/action-setup@v4
           
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        
+      - name: Run postinstall
+        run: pnpm run postinstall
         
       - name: Build Electron App
         run: pnpm run package:app
