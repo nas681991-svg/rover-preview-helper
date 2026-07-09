@@ -429,6 +429,10 @@ button:disabled {
   gap: 6px;
   margin-top: 10px;
 }
+.d-none { display: none; }
+.actions-flex { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.actions-flex-no-mb { display: flex; gap: 8px; flex-wrap: wrap; }
+.fast-mode-label { align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; cursor: pointer; }
 .upload-label {
   display: inline-flex;
   align-items: center;

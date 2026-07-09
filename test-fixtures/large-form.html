@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Large Form Test Fixture (50 Fields)</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 24px; background: #1a1a2e; color: #e0e0e0; }
@@ -24,6 +25,9 @@
       font-size: 14px; cursor: pointer; font-weight: 600;
     }
     #field-count { color: #533483; font-size: 12px; }
+    #result { display: none; margin-top: 20px; background: #0d4b2c; padding: 16px; border-radius: 8px; }
+    .success-heading { color: #4ade80; }
+    #result-json { color: #d1fae5; font-size: 12px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -361,9 +365,9 @@
     </div>
   </form>
 
-  <div id="result" style="display:none; margin-top: 20px; background: #0d4b2c; padding: 16px; border-radius: 8px;">
-    <h2 style="color: #4ade80;">Form Submitted Successfully</h2>
-    <pre id="result-json" style="color: #d1fae5; font-size: 12px; white-space: pre-wrap;"></pre>
+  <div id="result">
+    <h2 class="success-heading">Form Submitted Successfully</h2>
+    <pre id="result-json"></pre>
   </div>
 
   <script>

@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Multi-Page Wizard Test Fixture</title>
   <style>
     body { font-family: system-ui, sans-serif; padding: 24px; background: #1a1a2e; color: #e0e0e0; }
     h1 { color: #00d4ff; }
+    h2 { color: #e94560; }
     .wizard-page { background: #16213e; padding: 20px; border-radius: 8px; margin-top: 16px; }
     .wizard-page.hidden { display: none; }
     label { font-weight: 600; color: #a8dadc; display: block; margin-top: 12px; }
@@ -29,7 +31,7 @@
 
   <!-- Page 1 -->
   <div id="page-1" class="wizard-page">
-    <h2 style="color: #e94560;">Personal Information</h2>
+    <h2>Personal Information</h2>
     <label for="first-name">First Name</label>
     <input type="text" id="first-name" name="firstName" aria-label="First Name">
 
@@ -44,7 +46,7 @@
 
   <!-- Page 2 (initially hidden) -->
   <div id="page-2" class="wizard-page hidden">
-    <h2 style="color: #e94560;">Contact Details</h2>
+    <h2>Contact Details</h2>
     <label for="email">Email</label>
     <input type="email" id="email" name="email" aria-label="Email">
 
@@ -93,7 +95,7 @@
         page3.id = 'page-3';
         page3.className = 'wizard-page';
         page3.innerHTML = `
-          <h2 style="color: #e94560;">Address</h2>
+          <h2>Address</h2>
           <label for="street">Street</label>
           <input type="text" id="street" name="street" aria-label="Street">
 
