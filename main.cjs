@@ -163,6 +163,8 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       if (fs.existsSync(cloudqaDir)) extensions.push(cloudqaDir);
     } else if (mode === 'rover') {
       extensions = [roverExtDir];
+    } else if (mode === 'form-recorder') {
+      extensions = [__dirname];
     } else if (mode === 'bugbug') {
       if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
     } else if (mode === 'seleniumbase') {
@@ -516,6 +518,49 @@ ipcMain.handle('read-record', async (event, filePath) => {
     return fs.readFileSync(resolved, 'utf-8');
   } catch (err) {
     return `Error reading file: ${err.message}`;
+  }
+});
+
+ipcMain.handle('extract-pdf', async (event, base64, filename) => {
+  try {
+    // Dynamically import the ES modules
+    const { extractFromPDF } = await import('file://' + path.resolve(__dirname, 'src/form-recorder/pdf-pipeline.js'));
+    const { convertToSkill } = await import('file://' + path.resolve(__dirname, 'src/form-recorder/skill-converter.js'));
+    
+    const buffer = Buffer.from(base64, 'base64');
+    const defaultColumns = [
+      'invoiceNumber', 'invoiceDate', 'dueDate', 'supplierName', 
+      'supplierAddress', 'customerName', 'customerAddress', 
+      'totalAmount', 'totalNet', 'totalTax', 'currency'
+    ];
+    
+    // ArrayBuffer is required by the pipeline
+    const { rows } = await extractFromPDF(buffer.buffer, defaultColumns);
+    const row = rows[0] || {};
+    
+    const formMap = {
+      name: filename.replace(/\.[^/.]+$/, ''),
+      startUrl: 'https://example.com/invoice-entry',
+      fields: Object.keys(row).filter(k => row[k]).map(k => ({
+        name: k,
+        label: k,
+        columnName: k,
+        fieldType: 'string'
+      }))
+    };
+    
+    const skill = convertToSkill(formMap);
+    
+    const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
+    fs.mkdirSync(myRecordsPath, { recursive: true });
+    
+    const outPath = path.join(myRecordsPath, `${formMap.name}.skill.json`);
+    fs.writeFileSync(outPath, JSON.stringify(skill, null, 2));
+    
+    return { ok: true, skill };
+  } catch (err) {
+    console.error('PDF extraction error:', err);
+    return { ok: false, error: err.message };
   }
 });
 

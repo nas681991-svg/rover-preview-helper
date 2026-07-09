@@ -1,13 +1,18 @@
 async function refreshFiles() {
   const files = await window.api.listRecords();
-  const listEl = document.getElementById('fileList');
-  listEl.textContent = '';
+  const fileListEl = document.getElementById('fileList');
+  const skillsListEl = document.getElementById('skillsList');
+  
+  if (fileListEl) fileListEl.textContent = '';
+  if (skillsListEl) skillsListEl.textContent = '';
   
   if (files.length === 0) {
-    const placeholder = document.createElement('div');
-    placeholder.style.cssText = 'padding: 15px; color: #666; font-size: 12px;';
-    placeholder.textContent = 'No records found. Click Launch Browser and save a recording.';
-    listEl.appendChild(placeholder);
+    if (fileListEl) {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'padding: 15px; color: #666; font-size: 12px;';
+      placeholder.textContent = 'No records found. Click Launch Browser and save a recording.';
+      fileListEl.appendChild(placeholder);
+    }
     return;
   }
   
@@ -21,7 +26,12 @@ async function refreshFiles() {
       const content = await window.api.readRecord(file.path);
       document.getElementById('editorContent').textContent = content;
     });
-    listEl.appendChild(div);
+    
+    if (file.name.endsWith('.skill.json')) {
+      if (skillsListEl) skillsListEl.appendChild(div);
+    } else {
+      if (fileListEl) fileListEl.appendChild(div);
+    }
   });
 }
 
@@ -50,3 +60,30 @@ refreshFiles();
 setInterval(() => {
   if (!document.hidden) refreshFiles();
 }, 5000);
+
+const pdfUploadInput = document.getElementById('pdfUploadInput');
+if (pdfUploadInput) {
+  pdfUploadInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const statusEl = document.getElementById('pdfUploadStatus');
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Parsing PDF...';
+    
+    try {
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+      
+      const result = await window.api.extractPdf(base64, file.name);
+      if (result && result.ok) {
+        statusEl.textContent = 'Success! Added to Skills Library.';
+        refreshFiles();
+      } else {
+        statusEl.textContent = 'Error: ' + (result?.error || 'Unknown error');
+      }
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+    }
+  });
+}
