@@ -519,7 +519,11 @@ if (uploadPdfInput) {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = '';
-      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk);
+      }
       const base64 = btoa(binary);
 
       const csvColumns = (currentFormMap.fields || [])

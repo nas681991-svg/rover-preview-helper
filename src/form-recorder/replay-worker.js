@@ -319,22 +319,24 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
     try {
       // Navigate to start URL (if not in Fast Mode)
       if (!fastMode || !formMap.apiSpec) {
-        await chrome.tabs.update(tabId, { url: formMap.startUrl });
-        // Wait for page to load
-        await new Promise(resolve => {
-          const listener = (updatedTabId, changeInfo) => {
-            if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        const tab = await chrome.tabs.update(tabId, { url: formMap.startUrl });
+        if (tab.status !== 'complete') {
+          // Wait for page to load
+          await new Promise(resolve => {
+            const listener = (updatedTabId, changeInfo) => {
+              if (updatedTabId === tabId && changeInfo.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+              }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            // Safety timeout
+            setTimeout(() => {
               chrome.tabs.onUpdated.removeListener(listener);
               resolve();
-            }
-          };
-          chrome.tabs.onUpdated.addListener(listener);
-          // Safety timeout
-          setTimeout(() => {
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve();
-          }, 15000);
-        });
+            }, 15000);
+          });
+        }
       }
 
       // Fast Mode API Bypass
@@ -442,6 +444,22 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
             const nav = (formMap.navActions || []).find(n => n.page === page);
             if (nav) {
               await clickNavigation(tabId, nav);
+              
+              // Wait for navigation (MPA full reload) or DOM stability (SPA)
+              await new Promise(resolve => {
+                const listener = (updatedTabId, changeInfo) => {
+                  if (updatedTabId === tabId && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                  }
+                };
+                chrome.tabs.onUpdated.addListener(listener);
+                setTimeout(() => {
+                  chrome.tabs.onUpdated.removeListener(listener);
+                  resolve();
+                }, 5000); // 5s timeout assumes SPA or slow load
+              });
+
               // Re-inject replay engine after page transition
               await injectReplayEngine(tabId);
               await waitForStability(tabId);

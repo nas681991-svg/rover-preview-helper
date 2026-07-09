@@ -779,6 +779,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener(tabId => {
   void clearState(tabId);
   void disableCspBypass(tabId);
+  
+  // Clear ephemeral caches to prevent memory leaks over long sessions
+  pendingInjects.delete(tabId);
+  refreshPromises.delete(tabId);
+  // pendingHydrations uses tabId:url keys, clean up any associated with this tab
+  for (const key of pendingHydrations.keys()) {
+    if (key.startsWith(`${tabId}:`)) {
+      pendingHydrations.delete(key);
+    }
+  }
 });
 
 async function handleNavigation(tabId, url) {
