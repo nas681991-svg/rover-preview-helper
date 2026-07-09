@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
   <title>Multi-Recorder App</title>
   <style>
@@ -98,13 +99,18 @@
       font-size: 13px;
       color: #d4d4d4;
     }
+    .mt-15 { margin-top: 15px; }
+    .mt-20 { margin-top: 20px; }
+    .skills-lib-container { padding: 10px; border-bottom: 1px solid #333; }
+    .pdf-upload-label { cursor: pointer; display: inline-block; padding: 8px 12px; background: #333; border-radius: 4px; border: 1px solid #555; font-size: 13px; color: #fff; width: calc(100% - 24px); text-align: center; }
+    .pdf-upload-status { margin-top: 10px; font-size: 12px; color: #aaa; text-align: center; display: none; }
   </style>
 </head>
 <body>
   <header>
     <h1>Multi-Recorder Dashboard</h1>
-    <div style="margin-top: 15px;">
-      <select id="modeSelect" class="mode-selector">
+    <div class="mt-15">
+      <select id="modeSelect" class="mode-selector" title="Mode Selector">
         <option value="all" selected>All Extensions (Run All at Once)</option>
         <option value="playwright-trace">Playwright Trace Mode</option>
         <option value="rover">Rover Preview Mode</option>
@@ -122,13 +128,13 @@
       <h3>Desktop/MyRecords</h3>
       <div id="fileList"></div>
       
-      <h3 style="margin-top: 20px;">Skills Library</h3>
-      <div style="padding: 10px; border-bottom: 1px solid #333;">
-        <label style="cursor: pointer; display: inline-block; padding: 8px 12px; background: #333; border-radius: 4px; border: 1px solid #555; font-size: 13px; color: #fff; width: calc(100% - 24px); text-align: center;">
+      <h3 class="mt-20">Skills Library</h3>
+      <div class="skills-lib-container">
+        <label class="pdf-upload-label">
           📄 Convert PDF to CSV
-          <input type="file" id="pdfUploadInput" accept=".pdf" multiple style="display: none;" />
+          <input type="file" id="pdfUploadInput" accept=".pdf" multiple hidden />
         </label>
-        <div id="pdfUploadStatus" style="margin-top: 10px; font-size: 12px; color: #aaa; text-align: center; display: none;"></div>
+        <div id="pdfUploadStatus" class="pdf-upload-status"></div>
       </div>
       <div id="skillsList"></div>
     </div>

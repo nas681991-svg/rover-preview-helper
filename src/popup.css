@@ -234,6 +234,7 @@ button:disabled {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 .sessions-header:hover { color: var(--text); }
@@ -310,6 +311,7 @@ button:disabled {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 .diagnostics-header:hover { color: var(--text); }
