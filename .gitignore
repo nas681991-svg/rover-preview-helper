@@ -1,6 +1,11 @@
-﻿dist/
+dist/
 node_modules/
 .rover-vendor-cache/
 .DS_Store
 release/
 .integration-test-data/
+
+# Ignoring screenshot script outputs
+.screenshot-data/
+*.zip
+*.png

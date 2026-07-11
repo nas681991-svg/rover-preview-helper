@@ -5,6 +5,8 @@ import { convertToSkill, downloadSkill } from './skill-converter.js';
 describe('skill-converter', () => {
   let downloads = [];
 
+  let originalURL;
+
   beforeEach(() => {
     downloads = [];
     globalThis.chrome = {
@@ -14,20 +16,13 @@ describe('skill-converter', () => {
         }
       }
     };
-    globalThis.FileReader = class {
-      readAsDataURL(blob) {
-        setTimeout(() => {
-          this.result = 'data:application/json;base64,eyJ0ZXN0Ijp0cnVlfQ==';
-          this.onload();
-        }, 1);
-      }
-    };
     globalThis.Blob = class {
       constructor(parts, options) {
         this.parts = parts;
         this.options = options;
       }
     };
+    originalURL = globalThis.URL;
     globalThis.URL = class {
       constructor(url) {
         this.hostname = 'test.com';
@@ -35,14 +30,16 @@ describe('skill-converter', () => {
       static createObjectURL(blob) {
         return 'data:application/json;base64,mock';
       }
+      static revokeObjectURL(url) {
+        // no-op
+      }
     };
   });
 
   afterEach(() => {
     delete globalThis.chrome;
-    delete globalThis.FileReader;
     delete globalThis.Blob;
-    delete globalThis.URL;
+    globalThis.URL = originalURL;
   });
 
   test('convertToSkill handles empty fields', () => {
@@ -79,16 +76,5 @@ describe('skill-converter', () => {
     assert.equal(downloads.length, 1);
     assert.equal(downloads[0].filename, 'Test.skill.json');
     assert.ok(downloads[0].url.startsWith('data:'));
-  });
-
-  test('downloadSkill handles FileReader error', async () => {
-    globalThis.FileReader = class {
-      readAsDataURL(blob) {
-        setTimeout(() => {
-          if (this.onerror) this.onerror({ target: { error: new Error('FileReader Error') } });
-        }, 1);
-      }
-    };
-    await assert.rejects(downloadSkill({ startUrl: 'https://test.com', fields: [] }), /FileReader Error/);
   });
 });

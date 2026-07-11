@@ -69,17 +69,8 @@ function preseedChromePreferences(userDataDir, extensionPaths = []) {
 
   prefs.extensions.ui.developer_mode = true;
 
-  for (const extPath of extensionPaths) {
-    const id = computeExtensionId(extPath);
-    if (!prefs.extensions.settings[id]) prefs.extensions.settings[id] = {};
-    prefs.extensions.settings[id].incognito = true;
-  }
-
-  const KNOWN_IDS = ['oiedehaafceacbnnmindilfblafincjb']; // Bugbug
-  for (const id of KNOWN_IDS) {
-    if (!prefs.extensions.settings[id]) prefs.extensions.settings[id] = {};
-    prefs.extensions.settings[id].incognito = true;
-  }
+  if (!prefs.background_mode) prefs.background_mode = {};
+  prefs.background_mode.enabled = false;
 
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
 }
@@ -140,7 +131,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
   launchInProgress = true;
   try {
     fs.mkdirSync(extDataDir, { recursive: true });
-    
+
     // Determine which extensions to update and load based on mode
     let targetSources = [];
     if (mode === 'bugbug' || mode === 'all') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'Bugbug')];
@@ -171,7 +162,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       if (fs.existsSync(sbaseExtDir)) extensions.push(sbaseExtDir);
     }
     const extensionsStr = extensions.join(',');
-    
+
     const userDataDir = path.join(app.getPath('userData'), 'browser-data');
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
     fs.mkdirSync(myRecordsPath, { recursive: true });
@@ -181,16 +172,14 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
 
     let context = null;
     let launchError = null;
-    const channels = ['chrome', 'msedge'];
-    
+    const channels = [undefined];
+
     for (const channel of channels) {
       try {
         context = await chromium.launchPersistentContext(userDataDir, {
           headless: false,
-          channel: channel, 
           acceptDownloads: true,
           downloadsPath: myRecordsPath,
-          ignoreDefaultArgs: ['--enable-automation'],
           args: [
             ...(extensionsStr ? [`--disable-extensions-except=${extensionsStr}`, `--load-extension=${extensionsStr}`] : []),
             '--disable-blink-features=AutomationControlled',
@@ -209,23 +198,23 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     if (!context) {
       throw new Error(`Failed to launch browser. Please ensure Google Chrome or Microsoft Edge is installed on your system. Details: ${launchError?.message}`);
     }
-    
+
     // Start Native Playwright Tracing with Chunking
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     await context.tracing.startChunk({ title: 'Chunk 1' });
-    
+
     let chunkCount = 1;
     const chunkInterval = setInterval(async () => {
       chunkCount++;
       try {
-        const tracePath = path.join(myRecordsPath, `trace-${Date.now()}-part${chunkCount-1}.zip`);
+        const tracePath = path.join(myRecordsPath, `trace-${Date.now()}-part${chunkCount - 1}.zip`);
         await context.tracing.stopChunk({ path: tracePath });
         await context.tracing.startChunk({ title: `Chunk ${chunkCount}` });
       } catch (err) {
         console.error('Failed to save trace chunk:', err);
       }
     }, 3 * 60 * 1000);
-    
+
     let tracingStopped = false;
     const stopTracing = async () => {
       if (tracingStopped) return;
@@ -297,7 +286,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     });
 
     const closeStreams = () => {
-      try { 
+      try {
         networkStream.end();
         consoleStream.end();
         redirectStream.end();
@@ -308,13 +297,13 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
         a11yStream.end();
         sessionReplayStream.write('null]');
         sessionReplayStream.end();
-      } catch (_) {}
+      } catch (_) { }
     };
     context.on('close', closeStreams);
 
     // Add rrweb dependency
     await context.addInitScript({ path: path.join(__dirname, 'node_modules', 'rrweb', 'dist', 'rrweb.umd.min.cjs') });
-    
+
     await context.addInitScript(() => {
       // ── rrweb Session Replay ──────────────────────────────────────────
       if (window.rrweb && !window.__rrwebStarted) {
@@ -327,7 +316,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
         });
         setInterval(() => {
           if (_rrwebBuffer.length > 0) {
-            try { window.__rrwebFlush(_rrwebBuffer.splice(0)); } catch (_) {}
+            try { window.__rrwebFlush(_rrwebBuffer.splice(0)); } catch (_) { }
           }
         }, 2000);
       }
@@ -336,33 +325,33 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       if (!window.__perfStarted) {
         window.__perfStarted = true;
         const pushPerf = (type, metric) => {
-          try { window.__advancedLogFlush([{ type, ...metric, ts: Date.now() }]); } catch (_) {}
+          try { window.__advancedLogFlush([{ type, ...metric, ts: Date.now() }]); } catch (_) { }
         };
 
         try {
           const observer = new PerformanceObserver((list) => {
             list.getEntries().forEach(entry => {
               if (['paint', 'largest-contentful-paint', 'layout-shift', 'longtask'].includes(entry.entryType)) {
-                pushPerf('perf', { 
-                  entryType: entry.entryType, 
-                  name: entry.name, 
-                  startTime: entry.startTime, 
+                pushPerf('perf', {
+                  entryType: entry.entryType,
+                  name: entry.name,
+                  startTime: entry.startTime,
                   duration: entry.duration,
-                  url: location.href 
+                  url: location.href
                 });
               } else if (entry.entryType === 'resource') {
-                pushPerf('resource', { 
-                  entryType: entry.entryType, 
-                  name: entry.name, 
-                  startTime: entry.startTime, 
+                pushPerf('resource', {
+                  entryType: entry.entryType,
+                  name: entry.name,
+                  startTime: entry.startTime,
                   duration: entry.duration,
-                  url: location.href 
+                  url: location.href
                 });
               }
             });
           });
           observer.observe({ entryTypes: ['paint', 'largest-contentful-paint', 'layout-shift', 'longtask', 'resource'] });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // ── DOM Mutation Observer ─────────────────────────────────────────
@@ -382,10 +371,10 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
           }
         });
         domObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
-        
+
         setInterval(() => {
           if (mutationsBatch.added > 0 || mutationsBatch.removed > 0 || mutationsBatch.attrs > 0 || mutationsBatch.chars > 0) {
-            try { window.__advancedLogFlush([{ type: 'dom_mutation_summary', ...mutationsBatch, ts: Date.now(), url: location.href }]); } catch (_) {}
+            try { window.__advancedLogFlush([{ type: 'dom_mutation_summary', ...mutationsBatch, ts: Date.now(), url: location.href }]); } catch (_) { }
             mutationsBatch = { added: 0, removed: 0, attrs: 0, chars: 0 };
           }
         }, 5000);
@@ -413,9 +402,9 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       setInterval(() => {
         try {
           if (window.chrome && chrome.runtime && chrome.runtime.sendMessage) {
-            chrome.runtime.sendMessage({ping: true}).catch(() => {});
+            chrome.runtime.sendMessage({ ping: true }).catch(() => { });
           }
-        } catch (e) {}
+        } catch (e) { }
       }, 20000);
     });
 
@@ -436,7 +425,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
           if (results && results.violations && results.violations.length > 0) {
             a11yStream.write(JSON.stringify({ type: 'a11y-audit', url: page.url(), violations: results.violations.map(v => ({ id: v.id, impact: v.impact, description: v.description, nodes: v.nodes.length })), ts: Date.now() }) + '\n');
           }
-        } catch (e) {}
+        } catch (e) { }
       });
     };
 
@@ -451,7 +440,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     context.on('close', () => void stopTracing());
 
     const page1 = context.pages()[0] || await context.newPage();
-    
+
     if (mode === 'bugbug') {
       await page1.goto('https://app.bugbug.io/sign-in/');
     } else if (mode === 'rover') {
@@ -459,7 +448,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     } else {
       await page1.goto('https://google.com');
     }
-    
+
     await page1.bringToFront();
 
     let mcpProcess = null;
@@ -479,7 +468,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     // Wait for the browser to be closed by the user before reporting success.
     await new Promise(resolve => context.on('close', resolve));
     if (mcpProcess) {
-      try { process.kill(isWin ? mcpProcess.pid : -mcpProcess.pid); } catch (_) {}
+      try { process.kill(isWin ? mcpProcess.pid : -mcpProcess.pid); } catch (_) { }
     }
     await stopTracing();
     return 'success';
@@ -499,7 +488,7 @@ ipcMain.handle('list-records', async () => {
     return files.map(file => ({
       name: file,
       path: path.join(myRecordsPath, file)
-    })).sort((a,b) => b.name.localeCompare(a.name));
+    })).sort((a, b) => b.name.localeCompare(a.name));
   } catch (err) {
     console.error(err);
     return [];
@@ -526,18 +515,18 @@ ipcMain.handle('extract-pdf', async (event, base64, filename) => {
     // Dynamically import the ES modules
     const { extractFromPDF } = await import('file://' + path.resolve(__dirname, 'src/form-recorder/pdf-pipeline.js'));
     const { convertToSkill } = await import('file://' + path.resolve(__dirname, 'src/form-recorder/skill-converter.js'));
-    
+
     const buffer = Buffer.from(base64, 'base64');
     const defaultColumns = [
-      'invoiceNumber', 'invoiceDate', 'dueDate', 'supplierName', 
-      'supplierAddress', 'customerName', 'customerAddress', 
+      'invoiceNumber', 'invoiceDate', 'dueDate', 'supplierName',
+      'supplierAddress', 'customerName', 'customerAddress',
       'totalAmount', 'totalNet', 'totalTax', 'currency'
     ];
-    
+
     // ArrayBuffer is required by the pipeline
     const { rows } = await extractFromPDF(buffer.buffer, defaultColumns);
     const row = rows[0] || {};
-    
+
     const formMap = {
       name: filename.replace(/\.[^/.]+$/, ''),
       startUrl: 'https://example.com/invoice-entry',
@@ -548,15 +537,15 @@ ipcMain.handle('extract-pdf', async (event, base64, filename) => {
         fieldType: 'string'
       }))
     };
-    
+
     const skill = convertToSkill(formMap);
-    
+
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
     fs.mkdirSync(myRecordsPath, { recursive: true });
-    
+
     const outPath = path.join(myRecordsPath, `${formMap.name}.skill.json`);
     fs.writeFileSync(outPath, JSON.stringify(skill, null, 2));
-    
+
     return { ok: true, skill };
   } catch (err) {
     console.error('PDF extraction error:', err);
