@@ -607,14 +607,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'ROVER_PREVIEW_HELPER_SET_CONFIG' || message.type === 'ROVER_PREVIEW_HELPER_INJECT') {
+    console.log('[DEBUG] Received INJECT message for tab:', message.tabId);
     const tabId = Number(message.tabId);
     const config = normalizeConfig(message.config || {});
     void (async () => {
-      const state = await injectFromTab(tabId, config);
-      try { sendResponse({ ok: true, state }); } catch { /* port closed */ }
-    })().catch(error => {
-      try { sendResponse({ ok: false, error: String(error?.message || error) }); } catch { /* port closed */ }
-    });
+      console.log('[DEBUG] Calling injectFromTab');
+      try {
+        const state = await injectFromTab(tabId, config);
+        console.log('[DEBUG] injectFromTab finished. Sending response ok: true');
+        try { sendResponse({ ok: true, state }); } catch (e) { console.log('[DEBUG] sendResponse error:', e); }
+      } catch (error) {
+        console.log('[DEBUG] injectFromTab threw:', error);
+        try { sendResponse({ ok: false, error: String(error?.message || error) }); } catch (e) { console.log('[DEBUG] sendResponse error:', e); }
+      }
+    })();
     return true;
   }
 

@@ -1,6 +1,6 @@
 import { normalizeConfig, validateConfigInput, STORAGE_KEY_PREFIX, STATUS_KEY_PREFIX } from './shared.js';
 import { generateTemplate, parseCSV } from './form-recorder/csv-engine.js';
-import { downloadSkill, downloadUASL } from './form-recorder/skill-converter.js';
+import { downloadUASL } from './form-recorder/skill-converter.js';
 
 const configEl = document.getElementById('config');
 const statusEl = document.getElementById('status');

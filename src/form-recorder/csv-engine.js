@@ -117,7 +117,7 @@ export function generateTemplate(formMap) {
   // Build CSV rows
   const headerRow = columns.map(c => escapeCSVField(c.header)).join(',');
   const metadataRow = '# ' + columns.map(c => escapeCSVField(c.metadata)).join(',');
-  const exampleRow = columns.map(c => escapeCSVField(c.exampleValue)).join(',');
+  const exampleRow = '# example: ' + columns.map(c => escapeCSVField(c.exampleValue)).join(',');
 
   return [headerRow, metadataRow, exampleRow, ''].join('\n');
 }
@@ -234,6 +234,7 @@ export function parseCSV(csvText) {
   // Parse data rows
   const rows = [];
   for (let i = dataStartIndex; i < lines.length; i++) {
+    if (lines[i].trim() === '' || lines[i].startsWith('#') || lines[i].startsWith('"#')) continue;
     const values = parseCSVRow(lines[i]);
     const row = {};
     for (let j = 0; j < columns.length; j++) {

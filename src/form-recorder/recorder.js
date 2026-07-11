@@ -53,6 +53,11 @@ function fieldKey(el) {
     path.unshift(`${cur.tagName}[${idx}]`);
     cur = parent;
   }
+  if (cur === document.body) {
+    path.unshift('BODY');
+  } else if (cur === document.documentElement) {
+    path.unshift('HTML');
+  }
   return `path:${path.join('>')}`;
 }
 

@@ -319,8 +319,14 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
     try {
       // Navigate to start URL (if not in Fast Mode)
       if (!fastMode || !formMap.apiSpec) {
-        const tab = await chrome.tabs.update(tabId, { url: formMap.startUrl });
-        if (tab.status !== 'complete') {
+        const tab = await chrome.tabs.get(tabId);
+        let needsNav = true;
+        try {
+          needsNav = new URL(tab.url).href !== new URL(formMap.startUrl).href;
+        } catch { }
+
+        if (needsNav || tab.status !== 'complete') {
+          if (needsNav) await chrome.tabs.update(tabId, { url: formMap.startUrl });
           // Wait for page to load
           await new Promise(resolve => {
             const listener = (updatedTabId, changeInfo) => {

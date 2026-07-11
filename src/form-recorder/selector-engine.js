@@ -51,6 +51,13 @@ function buildCssPath(el) {
     parts.unshift(segment);
     current = parent;
   }
+  
+  if (current === document.body && parts.length > 0 && !parts[0].startsWith('#')) {
+    parts.unshift('body');
+  } else if (current === document.documentElement && parts.length > 0 && !parts[0].startsWith('#')) {
+    parts.unshift('html');
+  }
+  
   return parts.join(' > ');
 }
 
@@ -278,7 +285,7 @@ function querySelectorDeep(selector, root = document) {
     el = root.querySelector(selector);
     if (el) return el;
   } catch {
-    return null;
+    // Ignore invalid selector syntax for this root, still check Shadow DOM
   }
   
   const iter = document.createNodeIterator(root, NodeFilter.SHOW_ELEMENT, null, false);
