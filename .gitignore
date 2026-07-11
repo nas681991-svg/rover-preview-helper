@@ -12,5 +12,7 @@ release/
 
 # Ignore test artifacts
 .playwright-userDataDir/
+.playwright-gui-test/
 extensions/
 .env
+*.ras.json

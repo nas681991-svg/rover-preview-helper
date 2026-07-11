@@ -1,7 +1,8 @@
 import { chromium } from 'patchright';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -19,7 +20,38 @@ function preseedChromePreferences(dir) {
   writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
 }
 
-async function main() {
+function killZombies() {
+  console.log('[AUTO-HEAL] Attempting to terminate zombie Chrome/Chromium processes...');
+  try {
+    if (process.platform === 'win32') {
+      execSync('taskkill /F /IM chrome.exe /T', { stdio: 'ignore' });
+      execSync('taskkill /F /IM msedge.exe /T', { stdio: 'ignore' });
+    } else {
+      execSync('pkill -f chrome', { stdio: 'ignore' });
+      execSync('pkill -f chromium', { stdio: 'ignore' });
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+function cleanProfile() {
+  console.log('[AUTO-HEAL] Wiping corrupted Playwright user data directory...');
+  try {
+    rmSync(userDataDir, { recursive: true, force: true });
+  } catch (e) {
+    if (e.code === 'EBUSY' || e.code === 'EPERM') {
+      killZombies();
+      try {
+        rmSync(userDataDir, { recursive: true, force: true });
+      } catch (err) {
+        console.error('[AUTO-HEAL] FATAL: Unable to delete profile directory even after killing zombies.', err);
+      }
+    }
+  }
+}
+
+async function attemptLaunch() {
   console.log('Playwright: Launching browser with extensions...');
   
   const extensions = [bugbugDir, roverExtDir];
@@ -57,8 +89,9 @@ async function main() {
   const extTargets = targetInfos.filter(t => t.url.startsWith('chrome-extension://'));
   
   console.log('--- ACTUAL LOADED EXTENSION TARGETS ---');
-  if (extTargets.length === 0) {
-    console.log('WARNING: ZERO extensions loaded in the browser!');
+  if (extTargets.length < extensions.length) {
+    console.log(`WARNING: Expected ${extensions.length} extensions but only ${extTargets.length} loaded in the browser!`);
+    throw new Error('EXTENSIONS_FAILED_TO_LOAD');
   } else {
     extTargets.forEach(t => console.log(`- ${t.title || 'Unknown'} (${t.url})`));
   }
@@ -68,7 +101,23 @@ async function main() {
   await page.pause();
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+async function main(retries = 3) {
+  try {
+    await attemptLaunch();
+  } catch (err) {
+    console.error(`\n[CRITICAL FAILURE] Launch crashed: ${err.message}`);
+    if (retries === 0) {
+      console.error('[AUTO-HEAL] Out of retries. Aborting.');
+      process.exit(1);
+    }
+    
+    console.log(`[AUTO-HEAL] Initiating recovery sequence... (${retries} retries left)`);
+    cleanProfile();
+    
+    // Slight backoff
+    await new Promise(r => setTimeout(r, 2000));
+    await main(retries - 1);
+  }
+}
+
+main();

@@ -1,5 +1,5 @@
 import { spawn, execSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,10 +62,16 @@ async function downloadBugbug() {
 async function startPlaywright() {
   console.log('Launching browser with all extensions...');
   const pwScript = path.join(__dirname, 'launch-playwright.mjs');
-  spawn('node', [pwScript], { stdio: 'inherit', cwd: root });
+  return new Promise((resolve, reject) => {
+    const p = spawn('node', [pwScript], { stdio: 'inherit', cwd: root });
+    p.on('close', (code) => {
+      if (code !== 0) reject(new Error(`launch-playwright exited with code ${code}`));
+      else resolve();
+    });
+  });
 }
 
-async function main() {
+async function attemptMain() {
   console.log('Building Rover Preview Helper extension...');
   execSync('pnpm build', { stdio: 'inherit', cwd: root });
   
@@ -74,7 +80,24 @@ async function main() {
   await startPlaywright();
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+async function main(retries = 2) {
+  try {
+    await attemptMain();
+  } catch (err) {
+    console.error(`\n[CRITICAL FAILURE] Multi-Recorder crashed: ${err.message}`);
+    if (retries === 0) {
+      console.error('[AUTO-HEAL] Out of multi-recorder retries. Aborting entirely.');
+      process.exit(1);
+    }
+    console.log(`[AUTO-HEAL] Wiping local dist and extensions cache for clean retry... (${retries} left)`);
+    try {
+      await rm(extensionsDir, { recursive: true, force: true });
+      await rm(roverExtDir, { recursive: true, force: true });
+    } catch(e) {}
+    
+    await new Promise(r => setTimeout(r, 2000));
+    await main(retries - 1);
+  }
+}
+
+main();
