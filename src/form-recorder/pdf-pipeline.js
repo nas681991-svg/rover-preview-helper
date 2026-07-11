@@ -8,10 +8,10 @@
  * Runs in the background service worker (has full network access).
  */
 
-const LLAMAPARSE_API_KEY = 'llx-RO1gFTPHilxaKSlEndZ32Qpz81dOX9gn8diWYSTshCADQMpU';
+const LLAMAPARSE_API_KEY = process.env.LLAMAPARSE_API_KEY;
 const LLAMAPARSE_BASE = 'https://api.cloud.llamaindex.ai/api/v1/parsing';
 
-const MINDEE_API_KEY = 'md_19oYM_2LuHROwfBcxPvkGV3T8tUa0mBvnZMg37z0vU0';
+const MINDEE_API_KEY = process.env.MINDEE_API_KEY;
 const MINDEE_BASE = 'https://api.mindee.net/v1/products/mindee/invoices/v4/predict';
 
 // ── LlamaParse ───────────────────────────────────────────────────────────────

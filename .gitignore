@@ -9,3 +9,8 @@ release/
 .screenshot-data/
 *.zip
 *.png
+
+# Ignore test artifacts
+.playwright-userDataDir/
+extensions/
+.env

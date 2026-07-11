@@ -32,7 +32,7 @@ async function main() {
 
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
-    ignoreDefaultArgs: ['--enable-automation'],
+    ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'],
     args: [
       `--disable-extensions-except=${extensionsStr}`,
       `--load-extension=${extensionsStr}`,
@@ -41,13 +41,29 @@ async function main() {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-infobars',
+      '--enable-logging',
+      '--v=1',
     ]
   });
   
   const page = context.pages()[0] || await context.newPage();
   await page.goto('https://google.com');
   
-  console.log('Playwright: Browser launched. All extensions are loaded.');
+  console.log('Playwright: Browser launched. Verifying loaded extensions via CDP...');
+  
+  const cdp = await context.newCDPSession(page);
+  const { targetInfos } = await cdp.send('Target.getTargets');
+  await cdp.detach();
+  const extTargets = targetInfos.filter(t => t.url.startsWith('chrome-extension://'));
+  
+  console.log('--- ACTUAL LOADED EXTENSION TARGETS ---');
+  if (extTargets.length === 0) {
+    console.log('WARNING: ZERO extensions loaded in the browser!');
+  } else {
+    extTargets.forEach(t => console.log(`- ${t.title || 'Unknown'} (${t.url})`));
+  }
+  console.log('---------------------------------------');
+
   console.log('Pausing Playwright so you can use the native Playwright Inspector Recorder, Bugbug, SeleniumBase Recorder, or Rover Recorder concurrently.');
   await page.pause();
 }
