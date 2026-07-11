@@ -1,6 +1,6 @@
 import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { convertToSkill, downloadSkill } from './skill-converter.js';
+import { convertToSkill, downloadSkill, convertToUASL, downloadUASL } from './skill-converter.js';
 
 describe('skill-converter', () => {
   let downloads = [];
@@ -75,6 +75,43 @@ describe('skill-converter', () => {
     });
     assert.equal(downloads.length, 1);
     assert.equal(downloads[0].filename, 'Test.skill.json');
+    assert.ok(downloads[0].url.startsWith('data:'));
+  });
+  test('convertToUASL generates correctly mapped yaml structure', () => {
+    const uasl = convertToUASL({
+      name: 'UASL Test',
+      startUrl: 'https://test.com',
+      fields: [
+        {
+          name: 'email',
+          label: 'Email Address',
+          selectorChain: ['#email', 'input[name="email"]', 'xpath://input[@id="email"]'],
+          coords: { x: 100, y: 200 }
+        }
+      ]
+    });
+    
+    assert.equal(uasl.version, '1.0.0');
+    assert.equal(uasl.metadata.target_url, 'https://test.com');
+    assert.equal(uasl.schema[0].field, 'email_address');
+    
+    // Test the selector cascade mapping
+    const step = uasl.steps.find(s => s.action === 'fill_field');
+    assert.ok(step);
+    assert.equal(step.selectors.primary, '#email');
+    assert.equal(step.selectors.xpath, '//input[@id="email"]');
+    assert.equal(step.selectors.heuristic, 'Email Address');
+    assert.equal(step.selectors.coordinates.x, 100);
+  });
+
+  test('downloadUASL creates Blob and downloads', async () => {
+    await downloadUASL({
+      name: 'Test',
+      startUrl: 'https://test.com',
+      fields: [{ name: 'test' }]
+    });
+    assert.equal(downloads.length, 1);
+    assert.equal(downloads[0].filename, 'Test.rover.json');
     assert.ok(downloads[0].url.startsWith('data:'));
   });
 });

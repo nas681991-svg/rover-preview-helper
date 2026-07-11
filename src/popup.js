@@ -1,6 +1,6 @@
 import { normalizeConfig, validateConfigInput, STORAGE_KEY_PREFIX, STATUS_KEY_PREFIX } from './shared.js';
 import { generateTemplate, parseCSV } from './form-recorder/csv-engine.js';
-import { downloadSkill } from './form-recorder/skill-converter.js';
+import { downloadSkill, downloadUASL } from './form-recorder/skill-converter.js';
 
 const configEl = document.getElementById('config');
 const statusEl = document.getElementById('status');
@@ -358,6 +358,7 @@ const recorderPageCount = document.getElementById('recorder-page-count');
 const recorderActions = document.getElementById('recorder-actions');
 const downloadCsvBtn = document.getElementById('recorder-download-csv');
 const downloadApiBtn = document.getElementById('recorder-download-api');
+const downloadUaslBtn = document.getElementById('recorder-download-uasl');
 const fastModeContainer = document.getElementById('fast-mode-container');
 const fastModeCheckbox = document.getElementById('fast-mode-checkbox');
 const uploadCsvInput = document.getElementById('recorder-upload-csv');
@@ -467,6 +468,18 @@ if (downloadApiBtn) {
     const name = `form-api-spec-${currentFormMap.id || Date.now()}.yaml`;
     chrome.downloads.download({ url, filename: name, saveAs: true });
     setStatus(`API Spec "${name}" ready for download.`);
+  });
+}
+
+// UASL Script Download
+if (downloadUaslBtn) {
+  downloadUaslBtn.addEventListener('click', () => {
+    if (!currentFormMap) { setStatus('No recording to export.', true); return; }
+    downloadUASL(currentFormMap).then(() => {
+      setStatus(`UASL format ready for download.`);
+    }).catch(err => {
+      setStatus(`Failed to download UASL: ${err.message}`, true);
+    });
   });
 }
 
