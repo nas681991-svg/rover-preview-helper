@@ -37,6 +37,9 @@ async function main() {
   // Verify all UI elements are present
   console.log('Verifying UI elements...');
   
+  // Open the details panel
+  await page.locator('summary:has-text("Advanced Form Tools (Multi-Recorder)")').click();
+  
   // Basic UI
   if (!await page.locator('#recorder-start').isVisible()) throw new Error('Start button missing');
   if (!await page.locator('#recorder-stop').isVisible()) throw new Error('Stop button missing');
