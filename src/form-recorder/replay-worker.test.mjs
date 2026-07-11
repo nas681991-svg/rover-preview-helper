@@ -62,7 +62,8 @@ describe('replay-worker', () => {
         },
         captureVisibleTab: (tabId, opts, cb) => {
           cb('data:image/jpeg;base64,mock');
-        }
+        },
+        get: async (tabId) => ({ id: tabId, url: 'http://t' })
       },
       debugger: {
         attach: async () => {},

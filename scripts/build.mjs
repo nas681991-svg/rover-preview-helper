@@ -46,13 +46,19 @@ async function bundleFormRecorder(distDir) {
   try {
     const selectorSrc = await readFile(selectorPath, 'utf-8');
 
-    // Bundle recorder (selector-engine + recorder)
+    // Bundle recorder (selector-engine + labeler + wizard-state + trace-engine + recorder)
     try {
+      const labelerSrc = await readFile(path.join(formDir, 'labeler.js'), 'utf-8');
+      const wizardStateSrc = await readFile(path.join(formDir, 'wizard-state.js'), 'utf-8');
+      const traceEngineSrc = await readFile(path.join(formDir, 'trace-engine.js'), 'utf-8').catch(() => '');
       const recorderSrc = await readFile(recorderPath, 'utf-8');
       const recorderBundle = [
         '// Auto-generated bundle — do not edit directly',
         '(() => {',
         stripExports(selectorSrc),
+        stripExports(labelerSrc),
+        stripExports(wizardStateSrc),
+        stripExports(traceEngineSrc),
         stripImports(stripExports(recorderSrc)),
         '})();',
       ].join('\n');

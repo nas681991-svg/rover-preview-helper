@@ -8,6 +8,7 @@
 import { captureField } from './selector-engine.js';
 import { labelFields } from './labeler.js';
 import { wizardState } from './wizard-state.js';
+import { startTrace, stopTrace, flushTrace } from './trace-engine.js';
 
 const STORAGE_KEY = 'rover-form-recorder:fields';
 const NAV_STORAGE_KEY = 'rover-form-recorder:nav';
@@ -216,6 +217,8 @@ export function startRecording() {
   wizardState.reset();
   fieldMap.clear();
 
+  startTrace();
+
   // Attach listeners
   document.addEventListener('mousemove', trackMouse, { passive: true });
   document.addEventListener('input', handleFieldInteraction, { capture: true, passive: true });
@@ -244,6 +247,7 @@ export async function stopRecording() {
   if (!recording) return { ok: false, reason: 'Not recording' };
 
   recording = false;
+  stopTrace();
 
   // Detach listeners
   document.removeEventListener('mousemove', trackMouse);
@@ -267,6 +271,7 @@ export async function stopRecording() {
     navActions: [...wizardState.navActions],
     startUrl,
     totalPages: wizardState.currentPage + 1,
+    telemetry: flushTrace(),
   };
 }
 

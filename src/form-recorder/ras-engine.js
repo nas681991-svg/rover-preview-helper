@@ -13,7 +13,7 @@
  * @returns {string} JSON string of the RAS script
  */
 export function generateRAS(formMap) {
-  const { fields = [], navActions = [], totalPages = 1, startUrl = '' } = formMap;
+  const { fields = [], navActions = [], totalPages = 1, startUrl = '', telemetry = [] } = formMap;
 
   const script = {
     version: "1.0.0",
@@ -27,7 +27,8 @@ export function generateRAS(formMap) {
       ]
     },
     schema: [],
-    steps: []
+    steps: [],
+    telemetry: telemetry || []
   };
 
   // Add initial navigation
