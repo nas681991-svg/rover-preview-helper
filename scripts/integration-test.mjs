@@ -273,11 +273,14 @@ async function runFullTests(context, page, extId) {
     const injectQuery = await cdpPopup.send('Runtime.evaluate', {
       expression: `(async () => {
         try {
-          return await chrome.runtime.sendMessage({
-            type: 'ROVER_PREVIEW_HELPER_INJECT',
-            tabId: ${tabId},
-            config: ${JSON.stringify(TEST_CONFIG)},
-          });
+          return await Promise.race([
+            chrome.runtime.sendMessage({
+              type: 'ROVER_PREVIEW_HELPER_INJECT',
+              tabId: ${tabId},
+              config: ${JSON.stringify(TEST_CONFIG)},
+            }),
+            new Promise(r => setTimeout(() => r({ ok: false, error: 'TIMEOUT' }), 5000))
+          ]);
         } catch (e) {
           return { ok: false, error: e.message };
         }
