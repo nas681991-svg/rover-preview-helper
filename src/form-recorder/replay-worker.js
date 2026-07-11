@@ -309,6 +309,7 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
         broadcastProgress(state);
         return state;
       }
+      state.status = resumedState.status;
     }
 
     state.currentRow = rowIdx + 1;
@@ -488,13 +489,24 @@ export async function startReplay(tabId, formMap, parsedCSV, fastMode = false) {
 
     state.results.push({ row, status: rowStatus, errorReason: rowError.trim() });
     state.lastStatus = rowStatus;
+    
+    // Sync status from storage before overwriting, in case pauseReplay or cancelReplay was called mid-row
+    const latestState = await getReplayState();
+    if (latestState) {
+      state.status = latestState.status;
+    }
+    
     await setReplayState(state);
     broadcastProgress(state);
   }
 
-  state.status = 'complete';
-  await setReplayState(state);
-  broadcastProgress(state);
+  // Only mark complete if not cancelled
+  const finalState = await getReplayState();
+  if (finalState && finalState.status !== 'cancelled') {
+    state.status = 'complete';
+    await setReplayState(state);
+    broadcastProgress(state);
+  }
   return state;
 }
 

@@ -110,7 +110,7 @@ describe('replay-worker', () => {
       columns: [], selectorMap: new Map(), navActions: [],
       rows: [ { 'F1': 'val1' }, { 'F1': 'val2' } ]
     };
-    const formMap = { id: 'form1', fields: [{ label: 'F1', page: 0 }], startUrl: 'http://t' };
+    const formMap = { id: 'form1', fields: [{ label: 'F1', page: 0 }], startUrl: 'http://different' };
 
     // Set up a trap to pause the replay during the loop
     const originalTabsUpdate = chrome.tabs.update;

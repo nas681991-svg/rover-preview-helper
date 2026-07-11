@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const bugbugDir = path.join(root, 'extensions', 'bugbug');
 const sbaseExtDir = path.join(root, 'extensions', 'sbase-recorder');
 const roverExtDir = path.join(root, 'dist');
-const userDataDir = path.join(root, '.playwright-userDataDir');
+let userDataDir = path.join(root, '.playwright-userDataDir');
 
 function preseedChromePreferences(dir) {
   const defaultDir = path.join(dir, 'Default');
@@ -45,7 +45,8 @@ function cleanProfile() {
       try {
         rmSync(userDataDir, { recursive: true, force: true });
       } catch (err) {
-        console.error('[AUTO-HEAL] FATAL: Unable to delete profile directory even after killing zombies.', err);
+        console.error('[AUTO-HEAL] Unable to delete profile directory. Bypassing lock by generating a fresh ephemeral profile...');
+        userDataDir = path.join(root, `.playwright-userDataDir-${Date.now()}`);
       }
     }
   }

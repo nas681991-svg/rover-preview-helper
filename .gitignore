@@ -16,3 +16,11 @@ release/
 extensions/
 .env
 *.ras.json
+
+# Ephemeral test and debug artifacts
+screenshot-daemon.py
+screenshot-daemon.ps1
+screenshot.ps1
+test-sw.mjs
+desktop.png
+.playwright-userDataDir*

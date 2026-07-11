@@ -201,6 +201,14 @@ async function main() {
 // ─── Full Tests (extension loaded) ─────────────────────────────────────────────
 
 async function runFullTests(context, page, extId) {
+  const setupWorker = worker => {
+    console.log(`[SW] Worker attached: ${worker.url()}`);
+    worker.on('console', msg => console.log(`[SW CONSOLE] ${msg.text()}`));
+    worker.on('pageerror', err => console.error(`[SW ERROR]`, err));
+  };
+  context.serviceWorkers().forEach(setupWorker);
+  context.on('serviceworker', setupWorker);
+
   // Test 1: Extension loads
   console.log('── Test 1: Extension loads ──');
   pass('Extension loaded and identified');

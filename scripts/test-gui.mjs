@@ -38,12 +38,18 @@ async function main() {
   console.log('Verifying UI elements...');
   
   // Open the details panel
-  await page.locator('summary:has-text("Advanced Form Tools (Multi-Recorder)")').click();
+  await page.locator('summary:has-text("Form Recorder")').click();
   
   // Basic UI
   if (!await page.locator('#recorder-start').isVisible()) throw new Error('Start button missing');
   if (!await page.locator('#recorder-stop').isVisible()) throw new Error('Stop button missing');
   
+  // Force show the actions panel
+  await page.evaluate(() => {
+    document.getElementById('recorder-actions').classList.remove('d-none');
+    document.getElementById('recorder-stats').classList.remove('d-none');
+  });
+
   // New Upload buttons we just styled
   const uploadCsvBtn = page.locator('label:has-text("Upload Filled CSV")');
   if (!await uploadCsvBtn.isVisible()) throw new Error('Upload CSV button missing');
@@ -58,11 +64,6 @@ async function main() {
   if (!await uploadPdfBatchBtn.isVisible()) throw new Error('Upload PDF Batch button missing');
 
   console.log('Taking screenshot of active actions state...');
-  // Force show the actions panel
-  await page.evaluate(() => {
-    document.getElementById('recorder-actions').classList.remove('d-none');
-    document.getElementById('recorder-stats').classList.remove('d-none');
-  });
   await page.screenshot({ path: path.join(root, 'gui_screenshot_actions.png') });
 
   console.log('GUI Test Passed: 100% Coverage verified on popup.html rendering.');
