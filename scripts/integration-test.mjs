@@ -242,6 +242,8 @@ async function runFullTests(context, page, extId) {
   await popup.close();
 
   const popupInject = await context.newPage();
+  popupInject.on('console', msg => console.log('[POPUP]', msg.text()));
+  popupInject.on('pageerror', err => console.log('[POPUP ERROR]', err));
   await popupInject.goto(`chrome-extension://${extId}/src/popup.html`);
   await sleep(1500);
 
