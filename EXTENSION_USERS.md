@@ -213,6 +213,9 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **Worker fails to load**  
   Set `workerUrl: chrome.runtime.getURL("vendor/worker.js")` and include `vendor/worker.js` under `web_accessible_resources`.
 
+- **Windows Native Chrome silently dropping unpacked extensions (`--load-extension` fails)**
+  When automating Chrome on Windows via Playwright or Puppeteer, native Chrome installations often silently reject unpacked extensions due to `AutomationControlled` flags. To fix this, do not bind to the native Chrome `channel: 'chrome'`. Instead, use Playwright's bundled Chromium which bypasses this restriction. See the multi-recorder documentation in `README.md`.
+
 - **You need to test many unrelated sites**  
   Use the reusable wildcard config from Live Test. For production-like behavior, use an exact site config from Workspace.
 
