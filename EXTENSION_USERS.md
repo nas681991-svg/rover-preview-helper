@@ -219,6 +219,21 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **You need to test many unrelated sites**  
   Use the reusable wildcard config from Live Test. For production-like behavior, use an exact site config from Workspace.
 
+## Replaying Automations with UASL (RAS)
+
+If your extension needs to perform bulk form-filling or record-and-replay tasks, you can leverage the **Unified Automation Script Language (UASL)**.
+UASL (exported as `.ras.json`) uses a **Selector Cascade** (CSS -> XPath -> Shadow DOM -> Text -> Vision API) to guarantee field fills even when the DOM changes.
+
+You can trigger a replay programmatically from your background script by sending a message to the `rover-preview-helper`:
+```js
+chrome.runtime.sendMessage({
+  type: 'FORM_REPLAY_START',
+  tabId: activeTabId,
+  parsedCSV: parsedRasObject // The object output from parseRAS()
+});
+```
+This bypasses fragile single-selector automation and leverages Rover's robust fallback systems.
+
 ## Guardrails
 
 - Only automate sites and accounts you are allowed to test.

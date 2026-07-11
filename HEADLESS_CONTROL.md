@@ -233,7 +233,32 @@ requiredSkills, seniority, and applyUrl if visible.
 
 Do not inject a remote `<script src="https://rover.rtrvr.ai/embed.js">` tag on strict sites. Package the runtime files with your extension and inject them with `chrome.scripting.executeScript`.
 
-See [EXTENSION_USERS.md](./EXTENSION_USERS.md) for the packaging pattern.
+See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [examples/headless-control-extension](./examples/headless-control-extension) for a copyable extension skeleton.
+
+## Headless Execution of UASL (RAS)
+
+If you are using the Unified Automation Script Language (UASL / `.ras.json`), you do not need to use the `window.rover.send` natural language bridge. You can dispatch exact automation sequences by messaging the background script directly:
+
+```js
+// Background script execution of a pre-recorded RAS script
+const rasData = await fetch(chrome.runtime.getURL("scripts/my-recording.ras.json")).then(r => r.json());
+
+// You must parse it into the format the engine expects
+const parsed = {
+  columns: rasData.schema.map(s => s.field),
+  selectorMap: {},
+  rows: [/* Map your dynamic data here based on columns */],
+  navActions: []
+};
+
+chrome.runtime.sendMessage({
+  type: "FORM_REPLAY_START",
+  tabId: targetTabId,
+  parsedCSV: parsed
+});
+```
+
+This bypasses the LLM planning phase and goes straight to deterministic, high-speed execution using the Selector Cascade.
 
 ## Guardrails
 

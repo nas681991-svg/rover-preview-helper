@@ -72,17 +72,29 @@ or
             <div class="actions-flex">
               <button id="recorder-download-csv" class="secondary recorder-btn">📥 Download CSV Template</button>
               <button id="recorder-download-api" class="secondary recorder-btn d-none">📥 Download API Spec</button>
-              <button id="recorder-download-uasl" class="secondary recorder-btn">📥 Download UASL</button>
-            </div>
-            <div class="actions-flex-no-mb">
-              <label class="upload-label recorder-btn secondary">
-                📤 Upload Filled CSV
-                <input type="file" id="recorder-upload-csv" accept=".csv" class="d-none" />
-              </label>
-              <label class="upload-label recorder-btn secondary">
-                📄 Upload PDF → CSV
-                <input type="file" id="recorder-pdf-input" accept=".pdf" multiple class="d-none" />
-              </label>
+              <button id="recorder-download-ras" class="secondary recorder-btn">📥 Download RAS Script</button>
+              
+              <div style="display: flex; gap: 8px;">
+                <label class="secondary recorder-btn" style="flex: 1; text-align: center; cursor: pointer;">
+                  📤 Upload Filled CSV
+                  <input type="file" id="recorder-upload-csv" accept=".csv" class="d-none" />
+                </label>
+                <label class="secondary recorder-btn" style="flex: 1; text-align: center; cursor: pointer;">
+                  📤 Upload RAS Script
+                  <input type="file" id="recorder-upload-ras" accept=".json,.ras.json" class="d-none" />
+                </label>
+              </div>
+
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <label class="secondary recorder-btn" style="flex: 1; text-align: center; cursor: pointer;">
+                  📄 Upload PDF → CSV
+                  <input type="file" id="recorder-upload-pdf" accept=".pdf" class="d-none" />
+                </label>
+                <label class="secondary recorder-btn" style="flex: 1; text-align: center; cursor: pointer;">
+                  📄 Upload PDF Batch
+                  <input type="file" id="recorder-upload-pdf-batch" accept=".pdf" multiple class="d-none" />
+                </label>
+              </div>
             </div>
             <label class="fast-mode-toggle fast-mode-label d-none" id="fast-mode-container">
               <input type="checkbox" id="fast-mode-checkbox" checked />

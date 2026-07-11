@@ -324,7 +324,9 @@ node scripts/multi-recorder.mjs
 
 ## Unified Automation Script Language (UASL)
 
-This project exports recordings into the **Rover Automation Script (`.ras`) / `.rover.yaml`** format. This is an advanced, transpilable format that combines standard programmatic execution with Rover's Shadow DOM piercing and Vision API fallbacks.
+This project exports recordings into the **Rover Automation Script (`.ras.json`)** format. This is an advanced, transpilable format that combines standard programmatic execution with Rover's Shadow DOM piercing and Vision API fallbacks.
+
+By clicking **Download RAS Script** in the popup, you receive a full JSON definition representing your form map with the complete Selector Cascade (primary CSS, XPath fallback, text heuristics, coordinates). You can also **Upload RAS Script** to replay it directly.
 
 For full details on this overly-detailed scripting language, read the [UASL Specification](docs/UASL_SPEC.md).
 
