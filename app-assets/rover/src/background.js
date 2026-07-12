@@ -17,7 +17,8 @@ import {
   startReplay, pauseReplay, resumeReplay, cancelReplay, getReplayState,
 } from './form-recorder/replay-worker.js';
 import { extractFromPDF, extractFromMultiplePDFs } from './form-recorder/pdf-pipeline.js';
-
+import { startNetworkCapture, stopNetworkCapture } from './form-recorder/network-capture.js';
+import { generateOpenApiSpec } from './form-recorder/api-spec-generator.js';
 // Clean up stale CSP rules from previous sessions on every SW start.
 cleanupOrphanedRules();
 
@@ -608,11 +609,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = Number(message.tabId);
     const config = normalizeConfig(message.config || {});
     void (async () => {
-      const state = await injectFromTab(tabId, config);
-      try { sendResponse({ ok: true, state }); } catch { /* port closed */ }
-    })().catch(error => {
-      try { sendResponse({ ok: false, error: String(error?.message || error) }); } catch { /* port closed */ }
-    });
+      try {
+        const state = await injectFromTab(tabId, config);
+        try { sendResponse({ ok: true, state }); } catch (e) { console.log('[DEBUG] sendResponse error:', e); }
+      } catch (error) {
+        console.log('[DEBUG] injectFromTab threw:', error);
+        try { sendResponse({ ok: false, error: String(error?.message || error) }); } catch (e) { console.log('[DEBUG] sendResponse error:', e); }
+      }
+    })();
     return true;
   }
 
@@ -638,6 +642,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           world: 'ISOLATED',
           files: ['src/form-recorder/recorder-bundle.js'],
         });
+        
+        // Start CDP network capture for API spec generation
+        void startNetworkCapture(tabId).catch(() => {});
+        
         const result = await chrome.tabs.sendMessage(tabId, { type: 'FORM_RECORDER_START' });
         try { sendResponse({ ok: true, ...result }); } catch { /* port closed */ }
       } catch (err) {
@@ -663,6 +671,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             fields: result.fields,
             navActions: result.navActions || [],
           };
+          
+          // Stop network capture and generate OpenAPI spec
+          try {
+            const capturedRequests = await stopNetworkCapture(tabId);
+            const apiSpec = generateOpenApiSpec(capturedRequests, formMap);
+            if (apiSpec) {
+              formMap.apiSpec = apiSpec;
+            }
+          } catch (e) {
+            console.error('Failed to generate API spec:', e);
+          }
+          
           const id = await saveFormMap(formMap);
           formMap.id = id;
           try { sendResponse({ ok: true, formMap }); } catch { /* port closed */ }
@@ -708,7 +728,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         try { sendResponse({ ok: true, status: 'started' }); } catch { /* port closed */ }
         // Run replay in the background (don't await — it's long-running)
-        startReplay(tabId, formMap, message.parsedCSV).catch(err => {
+        startReplay(tabId, formMap, message.parsedCSV, message.fastMode).catch(err => {
           void logDiagnostic('error', 'replay', err);
         });
       } catch (err) {
@@ -761,6 +781,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener(tabId => {
   void clearState(tabId);
   void disableCspBypass(tabId);
+  
+  // Clear ephemeral caches to prevent memory leaks over long sessions
+  pendingInjects.delete(tabId);
+  refreshPromises.delete(tabId);
+  // pendingHydrations uses tabId:url keys, clean up any associated with this tab
+  for (const key of pendingHydrations.keys()) {
+    if (key.startsWith(`${tabId}:`)) {
+      pendingHydrations.delete(key);
+    }
+  }
 });
 
 async function handleNavigation(tabId, url) {

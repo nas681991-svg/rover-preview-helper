@@ -1,13 +1,14 @@
 import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { locateFieldVisually, dispatchCdpClick } from './visual-fallback.js';
+import { initializeListeners, setTestOverrides, clearTestOverrides } from './debugger-coordinator.js';
 
 describe('visual-fallback', () => {
   let commands = [];
   let attached = new Set();
   const originalFetch = globalThis.fetch;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     commands = [];
     attached.clear();
     
@@ -25,7 +26,8 @@ describe('visual-fallback', () => {
           } else {
             cb('data:image/jpeg;base64,test');
           }
-        }
+        },
+        onRemoved: { addListener: () => {}, removeListener: () => {} }
       },
       debugger: {
         attach: async (target) => {
@@ -37,14 +39,35 @@ describe('visual-fallback', () => {
         },
         sendCommand: async (target, method, params) => {
           commands.push({ method, params });
-        }
+        },
+        onEvent: { addListener: () => {}, removeListener: () => {} },
+        onDetach: { addListener: () => {}, removeListener: () => {} }
       }
     };
+
+    // Mock coordinator functions
+    setTestOverrides({
+      acquire: async (tabId, owner) => {
+        attached.add(tabId);
+        return { tabId, leaseId: `lease_${tabId}`, owner };
+      },
+      send: async (lease, method, params) => {
+        commands.push({ method, params });
+        return {};
+      },
+      release: async (lease) => {
+        attached.delete(lease.tabId);
+      }
+    });
+    
+    // Initialize listeners after chrome is set up
+    initializeListeners();
   });
 
   afterEach(() => {
     delete globalThis.chrome;
     globalThis.fetch = originalFetch;
+    clearTestOverrides();
   });
 
   test('locateFieldVisually captures tab and calls Vision API', async () => {
@@ -116,9 +139,11 @@ describe('visual-fallback', () => {
   });
 
   test('dispatchCdpClick handles already attached', async () => {
-    attached.add(999);
-    await dispatchCdpClick(999, 10, 20); // attach will throw, so it continues
+    // The coordinator handles attach state internally, so this test
+    // just verifies that the click commands are sent successfully
+    await dispatchCdpClick(999, 10, 20);
     assert.equal(commands.length, 2);
-    assert.equal(attached.size, 1); // Doesn't detach if it didn't attach
+    assert.equal(commands[0].method, 'Input.dispatchMouseEvent');
+    assert.equal(commands[0].params.type, 'mousePressed');
   });
 });

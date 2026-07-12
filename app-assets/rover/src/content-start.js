@@ -23,13 +23,19 @@
 
   window.addEventListener('message', event => {
     if (event.source !== window) return;
-    if (String(event.data?.type || '') !== 'ROVER_PREVIEW_HELPER_PING') return;
+    if (event.data?.type !== 'ROVER_PREVIEW_HELPER_PING') return;
     announceAvailability();
   });
 
-  try {
-    chrome.runtime.sendMessage(payload);
-  } catch {
-    // Background may not be ready yet. The navigation hooks will catch up.
-  }
+  const sendReady = (attempts = 0) => {
+    try {
+      chrome.runtime.sendMessage(payload).catch(() => {});
+    } catch {
+      if (attempts < 3) {
+        setTimeout(() => sendReady(attempts + 1), 500);
+      }
+    }
+  };
+  
+  sendReady();
 })();

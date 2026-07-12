@@ -1,6 +1,7 @@
-import { mkdir, copyFile, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, writeFile, stat, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import AdmZip from 'adm-zip';
 
 const root = new URL('..', import.meta.url);
 const rootDir = path.resolve(fileURLToPath(root));
@@ -190,3 +191,117 @@ export async function vendorRoverRuntime(options = {}) {
 
   return { base, files: manifestFiles };
 }
+
+/**
+ * Vendoring logic for SeleniumBase Recorder.
+ * Ensures the extension zip is available via PyPI wheel, extracts it to app-assets/sbase-recorder,
+ * and fails loudly if no valid candidate is found.
+ */
+export async function vendorSeleniumBaseRecorder(options = {}) {
+  const {
+    log = console.log,
+    version = '4.50.6',
+    destDir = path.join(rootDir, 'app-assets', 'sbase-recorder')
+  } = options;
+
+  log(`  - Fetching SeleniumBase version ${version} from PyPI...`);
+  const pypiUrl = `https://pypi.org/pypi/seleniumbase/${version}/json`;
+  let response;
+  try {
+    response = await fetch(pypiUrl);
+  } catch (err) {
+    throw new Error(`Failed to vendor SeleniumBase Recorder: Network error fetching ${pypiUrl} - ${err.message}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to vendor SeleniumBase Recorder: PyPI returned ${response.status} for version ${version}`);
+  }
+  
+  const data = await response.json();
+  const wheelUrl = data.urls?.find(u => u.filename.endsWith('.whl'))?.url;
+  
+  if (!wheelUrl) {
+    throw new Error(`Failed to vendor SeleniumBase Recorder: No .whl found for version ${version}`);
+  }
+  
+  log(`  - Downloading wheel from ${wheelUrl}...`);
+  let wheelRes;
+  try {
+    wheelRes = await fetch(wheelUrl);
+  } catch (err) {
+    throw new Error(`Failed to vendor SeleniumBase Recorder: Network error downloading wheel from ${wheelUrl} - ${err.message}`);
+  }
+
+  if (!wheelRes.ok) {
+    throw new Error(`Failed to vendor SeleniumBase Recorder: Wheel download failed with status ${wheelRes.status}`);
+  }
+  
+  const wheelBuffer = Buffer.from(await wheelRes.arrayBuffer());
+  const wheelZip = new AdmZip(wheelBuffer);
+  
+  const zipEntries = wheelZip.getEntries().filter(e => e.entryName.endsWith('.zip'));
+  let foundValidCandidate = false;
+  const candidateIssues = [];
+  
+  for (const entry of zipEntries) {
+    let candidateZip;
+    try {
+      const candidateBuffer = wheelZip.readFile(entry);
+      candidateZip = new AdmZip(candidateBuffer);
+    } catch (e) {
+      candidateIssues.push(`${entry.entryName}: failed to parse as zip (${e.message})`);
+      continue;
+    }
+    
+    // Check for manifest.json
+    const manifestEntry = candidateZip.getEntry('manifest.json');
+    if (!manifestEntry) {
+      candidateIssues.push(`${entry.entryName}: missing manifest.json`);
+      continue;
+    }
+    
+    try {
+      const manifestStr = candidateZip.readAsText(manifestEntry);
+      const manifest = JSON.parse(manifestStr);
+      
+      if (manifest.name === "SeleniumBase Recorder") {
+        log(`  - Discovered valid recorder candidate at ${entry.entryName}. Extracting...`);
+        
+        await rm(destDir, { recursive: true, force: true });
+        await mkdir(destDir, { recursive: true });
+        
+        candidateZip.extractAllTo(destDir, true);
+        
+        const extractedFiles = await readdir(destDir);
+        if (extractedFiles.length === 0) {
+          throw new Error('Extracted directory is empty');
+        }
+
+        foundValidCandidate = true;
+        break;
+      } else {
+        candidateIssues.push(`${entry.entryName}: manifest.name was "${manifest.name}", expected "SeleniumBase Recorder"`);
+      }
+    } catch (e) {
+      candidateIssues.push(`${entry.entryName}: invalid manifest.json (${e.message})`);
+    }
+  }
+  
+  if (!foundValidCandidate) {
+    throw new Error(`Failed to vendor SeleniumBase Recorder: No valid recorder extension candidate discovered. Diagnostics:\n${candidateIssues.join('\n')}`);
+  }
+  
+  log(`  - SeleniumBase Recorder extracted successfully to app-assets/sbase-recorder.`);
+}
+
+/**
+ * Orchestrates all vendoring operations.
+ */
+export async function vendorAll(options = {}) {
+  const { log = console.log } = options;
+  log('Vendoring Rover runtime:');
+  await vendorRoverRuntime(options);
+  log('Vendoring SeleniumBase Recorder:');
+  await vendorSeleniumBaseRecorder(options);
+}
+

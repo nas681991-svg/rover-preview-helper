@@ -2,7 +2,7 @@ import { mkdir, rm, copyFile, readdir, readFile, writeFile } from 'node:fs/promi
 import { watch } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { vendorRoverRuntime } from './vendor.mjs';
+import { vendorAll } from './vendor.mjs';
 
 const root = new URL('..', import.meta.url);
 const rootPath = fileURLToPath(root);
@@ -94,9 +94,9 @@ async function build() {
   await mkdir(distDir, { recursive: true });
   // Package the Rover runtime core + worker so the SDK can be injected via
   // chrome.scripting.executeScript instead of a page-CSP-blocked remote <script>.
+  // And package SeleniumBase recorder.
   // A plain `pnpm build` fetches the latest from prod; watch mode reuses cache.
-  console.log('Vendoring Rover runtime:');
-  await vendorRoverRuntime({ refresh: !watchMode, distDir });
+  await vendorAll({ refresh: !watchMode, distDir });
   await copyFile(path.resolve(rootPath, 'manifest.json'), path.join(distDir, 'manifest.json'));
   await copyTree(srcDir, path.join(distDir, 'src'));
   await copyFile(path.resolve(rootPath, 'README.md'), path.join(distDir, 'README.md'));
@@ -104,7 +104,15 @@ async function build() {
   await copyFile(path.resolve(rootPath, 'HEADLESS_CONTROL.md'), path.join(distDir, 'HEADLESS_CONTROL.md'));
   await copyTree(path.resolve(rootPath, 'examples'), path.join(distDir, 'examples'));
   await bundleFormRecorder(distDir);
+  
+  // Postbuild step: copy the built extension to app-assets/rover
+  // This ensures packaged versions of the Electron app contain a pre-built extension
+  const appAssetsRoverDir = path.resolve(rootPath, 'app-assets', 'rover');
+  await rm(appAssetsRoverDir, { recursive: true, force: true });
+  await copyTree(distDir, appAssetsRoverDir);
+
   console.log(`Built rover-preview-helper -> ${distDir}`);
+  console.log(`Copied extension to -> ${appAssetsRoverDir}`);
 }
 
 if (!watchMode) {

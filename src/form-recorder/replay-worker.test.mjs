@@ -4,6 +4,7 @@ import {
   saveFormMap, getFormMap, listFormMaps, startReplay, 
   pauseReplay, resumeReplay, cancelReplay, getReplayState 
 } from './replay-worker.js';
+import { initializeListeners, setTestOverrides, clearTestOverrides } from './debugger-coordinator.js';
 
 describe('replay-worker', () => {
   let sessionStore = {};
@@ -11,11 +12,12 @@ describe('replay-worker', () => {
   let messages = [];
   let scriptExecutions = [];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sessionStore = {};
     localStore = {};
     messages = [];
     scriptExecutions = [];
+
 
     globalThis.chrome = {
       storage: {
@@ -33,7 +35,20 @@ describe('replay-worker', () => {
         executeScript: async (opts) => {
           scriptExecutions.push(opts);
           if (opts.func) {
-            return [{ result: opts.func(...(opts.args || [])) }];
+            const oldWindow = globalThis.window;
+            globalThis.window = {
+              scrollTo: () => {},
+              innerWidth: 1000,
+              innerHeight: 800,
+              scrollX: 0,
+              scrollY: 0
+            };
+            try {
+              return [{ result: opts.func(...(opts.args || [])) }];
+            } finally {
+              if (oldWindow === undefined) delete globalThis.window;
+              else globalThis.window = oldWindow;
+            }
           }
         }
       },
@@ -63,30 +78,46 @@ describe('replay-worker', () => {
         captureVisibleTab: (tabId, opts, cb) => {
           cb('data:image/jpeg;base64,mock');
         },
-        get: async (tabId) => ({ id: tabId, url: 'http://t' })
+        get: async (tabId) => ({ id: tabId, url: 'http://t' }),
+        onRemoved: { addListener: () => {}, removeListener: () => {} }
       },
       debugger: {
         attach: async () => {},
         detach: async () => {},
-        sendCommand: async () => {}
+        sendCommand: async (target, method, params) => {
+          commands.push({ method, params });
+        },
+        onEvent: { addListener: () => {}, removeListener: () => {} },
+        onDetach: { addListener: () => {}, removeListener: () => {} }
       },
       runtime: {
-        sendMessage: async () => {}
+        sendMessage: async () => {},
+        getURL: (path) => path
       }
     };
     
-    globalThis.window = {
-      scrollTo: () => {},
-      innerWidth: 1000,
-      innerHeight: 800,
-      scrollX: 0,
-      scrollY: 0
-    };
+    // Initialize listeners after chrome is set up
+    setTestOverrides({
+      acquire: async (tabId, owner) => {
+        return { tabId, leaseId: `lease_${tabId}`, owner };
+      },
+      send: async (lease, method, params) => {
+        return {};
+      },
+      release: async (lease) => {
+        // No-op for tests
+      }
+    });
+    
+    // Initialize listeners after chrome is set up
+    initializeListeners();
   });
 
   afterEach(() => {
     delete globalThis.chrome;
     delete globalThis.window;
+
+    clearTestOverrides();
   });
 
   test('saveFormMap, getFormMap, listFormMaps', async () => {

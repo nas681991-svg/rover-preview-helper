@@ -7,8 +7,8 @@ import { execSync } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const bugbugDir = path.join(root, 'extensions', 'bugbug');
-const sbaseExtDir = path.join(root, 'extensions', 'sbase-recorder');
-const roverExtDir = path.join(root, 'dist');
+const roverExtDir = path.join(root, 'app-assets', 'rover');
+const sbaseExtDir = path.join(root, 'app-assets', 'sbase-recorder');
 let userDataDir = path.join(root, '.playwright-userDataDir');
 
 function preseedChromePreferences(dir) {

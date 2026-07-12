@@ -90,10 +90,12 @@ function encodeBase64Url(bytes) {
   if (typeof Buffer !== 'undefined') {
     base64 = Buffer.from(bytes).toString('base64');
   } else {
-    // Chunked approach to avoid RangeError on large payloads
+    // Chunked approach to avoid RangeError and GC thrashing on large payloads
     let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray ? bytes.subarray(i, i + chunkSize) : bytes.slice(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, chunk);
     }
     base64 = btoa(binary);
   }

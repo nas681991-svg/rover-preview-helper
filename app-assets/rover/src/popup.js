@@ -1,5 +1,7 @@
 import { normalizeConfig, validateConfigInput, STORAGE_KEY_PREFIX, STATUS_KEY_PREFIX } from './shared.js';
 import { generateTemplate, parseCSV } from './form-recorder/csv-engine.js';
+import { generateRAS, parseRAS } from './form-recorder/ras-engine.js';
+import { downloadUASL } from './form-recorder/skill-converter.js';
 
 const configEl = document.getElementById('config');
 const statusEl = document.getElementById('status');
@@ -120,6 +122,20 @@ async function loadPersistedConfig() {
 }
 
 injectBtn.addEventListener('click', async () => {
+  if (window.pendingReplayIntent) {
+    const tab = await getActiveTab();
+    if (!tab?.id) return;
+    chrome.runtime.sendMessage({
+      type: 'FORM_REPLAY_START',
+      tabId: tab.id,
+      formMapId: currentFormMap.id,
+      fastMode: window.pendingReplayIntent.fastMode,
+      parsedCSV: window.pendingReplayIntent.parsedCSV,
+    });
+    window.pendingReplayIntent = null;
+    return;
+  }
+
   injectBtn.disabled = true;
   reconnectBtn.disabled = true;
   try {
@@ -356,7 +372,13 @@ const recorderFieldCount = document.getElementById('recorder-field-count');
 const recorderPageCount = document.getElementById('recorder-page-count');
 const recorderActions = document.getElementById('recorder-actions');
 const downloadCsvBtn = document.getElementById('recorder-download-csv');
+const downloadApiBtn = document.getElementById('recorder-download-api');
+const downloadRasBtn = document.getElementById('recorder-download-ras');
+const downloadUaslBtn = document.getElementById('recorder-download-uasl');
+const fastModeContainer = document.getElementById('fast-mode-container');
+const fastModeCheckbox = document.getElementById('fast-mode-checkbox');
 const uploadCsvInput = document.getElementById('recorder-upload-csv');
+const uploadRasInput = document.getElementById('recorder-upload-ras');
 const uploadPdfInput = document.getElementById('recorder-pdf-input');
 const replayProgress = document.getElementById('replay-progress');
 const progressFill = document.getElementById('progress-fill');
@@ -420,6 +442,15 @@ if (recorderStopBtn) {
       if (recorderFieldCount) recorderFieldCount.textContent = String(fieldCount);
       if (recorderPageCount) recorderPageCount.textContent = String(pageCount);
       if (recorderActions) recorderActions.style.display = 'flex';
+      
+      if (currentFormMap.apiSpec) {
+        if (downloadApiBtn) downloadApiBtn.style.display = 'inline-block';
+        if (fastModeContainer) fastModeContainer.style.display = 'flex';
+      } else {
+        if (downloadApiBtn) downloadApiBtn.style.display = 'none';
+        if (fastModeContainer) fastModeContainer.style.display = 'none';
+      }
+      
       setStatus(`Recorded ${fieldCount} fields across ${pageCount} page(s). Download the CSV template or upload data.`);
     } else {
       setRecorderBadge('Ready', 'var(--muted)');
@@ -442,6 +473,50 @@ if (downloadCsvBtn) {
   });
 }
 
+// API Spec Download
+if (downloadApiBtn) {
+  downloadApiBtn.addEventListener('click', () => {
+    if (!currentFormMap || !currentFormMap.apiSpec) { setStatus('No API spec to export.', true); return; }
+    
+    // Quick YAML stringification for the OpenAPI spec
+    const yaml = JSON.stringify(currentFormMap.apiSpec, null, 2);
+    const blob = new Blob([yaml], { type: 'application/x-yaml' });
+    const url = URL.createObjectURL(blob);
+    const name = `form-api-spec-${currentFormMap.id || Date.now()}.yaml`;
+    chrome.downloads.download({ url, filename: name, saveAs: true });
+    setStatus(`API Spec "${name}" ready for download.`);
+  });
+}
+
+// UASL Script Download
+if (downloadUaslBtn) {
+  downloadUaslBtn.addEventListener('click', () => {
+    if (!currentFormMap) { setStatus('No recording to export.', true); return; }
+    downloadUASL(currentFormMap).then(() => {
+      setStatus(`UASL format ready for download.`);
+    }).catch(err => {
+      setStatus(`Failed to download UASL: ${err.message}`, true);
+    });
+  });
+}
+
+// RAS Script Download
+if (downloadRasBtn) {
+  downloadRasBtn.addEventListener('click', () => {
+    if (!currentFormMap) return;
+    const ras = generateRAS(currentFormMap);
+    const blob = new Blob([ras], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const name = `rover-script-${currentFormMap.id || Date.now()}.ras.json`;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`RAS script "${name}" ready for download.`);
+  });
+}
+
 // Filled CSV Upload → Bulk Replay
 if (uploadCsvInput) {
   uploadCsvInput.addEventListener('change', async (e) => {
@@ -455,6 +530,7 @@ if (uploadCsvInput) {
     let parsed;
     try {
       parsed = parseCSV(text);
+      fastModeContainer.classList.remove('d-none');
     } catch (err) {
       setStatus(`CSV Error: ${err.message}`, true);
       return;
@@ -468,9 +544,48 @@ if (uploadCsvInput) {
       type: 'FORM_REPLAY_START',
       tabId: tab.id,
       formMapId: currentFormMap.id,
+      fastMode: fastModeCheckbox && fastModeCheckbox.checked,
       parsedCSV: {
         columns: parsed.columns,
         selectorMap: Object.fromEntries(parsed.selectorMap),
+        rows: parsed.rows,
+        navActions: parsed.navActions
+      },
+    });
+  });
+}
+
+// RAS Script Upload → Bulk Replay
+if (uploadRasInput) {
+  uploadRasInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentFormMap) return;
+
+    const text = await file.text();
+    const tab = await getActiveTab();
+    if (!tab?.id) { setStatus('No active tab.', true); return; }
+
+    let parsed;
+    try {
+      parsed = parseRAS(text);
+      fastModeContainer.classList.remove('d-none');
+    } catch (err) {
+      setStatus(`RAS Error: ${err.message}`, true);
+      return;
+    }
+
+    setStatus(`Starting replay from RAS script…`);
+    if (replayProgress) replayProgress.style.display = 'block';
+    if (recorderActions) recorderActions.style.display = 'none';
+
+    chrome.runtime.sendMessage({
+      type: 'FORM_REPLAY_START',
+      tabId: tab.id,
+      formMapId: currentFormMap.id,
+      fastMode: fastModeCheckbox && fastModeCheckbox.checked,
+      parsedCSV: {
+        columns: parsed.columns,
+        selectorMap: {},
         rows: parsed.rows,
         navActions: parsed.navActions
       },
@@ -490,7 +605,11 @@ if (uploadPdfInput) {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = '';
-      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk);
+      }
       const base64 = btoa(binary);
 
       const csvColumns = (currentFormMap.fields || [])

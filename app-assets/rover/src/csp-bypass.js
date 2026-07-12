@@ -16,7 +16,7 @@ export const CSP_RULE_ID_BASE = 1_000_000;
 
 export function ruleIdForTab(tabId) {
   const num = Number(tabId);
-  if (!Number.isFinite(num)) throw new Error('Invalid tabId for CSP rule');
+  if (!Number.isInteger(num) || num < 0) throw new Error('Invalid tabId for CSP rule');
   return CSP_RULE_ID_BASE + num;
 }
 
@@ -67,7 +67,8 @@ async function hasCspBypassRule(tabId) {
  * that already happened).
  */
 export async function enableCspBypass(tabId) {
-  if (!Number.isFinite(Number(tabId))) return false;
+  const num = Number(tabId);
+  if (!Number.isInteger(num) || num < 0) return false;
   const alreadyEnabled = await hasCspBypassRule(tabId);
   await chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: [ruleIdForTab(tabId)],
@@ -77,7 +78,8 @@ export async function enableCspBypass(tabId) {
 }
 
 export async function disableCspBypass(tabId) {
-  if (!Number.isFinite(Number(tabId))) return;
+  const num = Number(tabId);
+  if (!Number.isInteger(num) || num < 0) return;
   try {
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: [ruleIdForTab(tabId)],

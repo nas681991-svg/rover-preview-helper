@@ -213,8 +213,26 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **Worker fails to load**  
   Set `workerUrl: chrome.runtime.getURL("vendor/worker.js")` and include `vendor/worker.js` under `web_accessible_resources`.
 
+- **Windows Native Chrome silently dropping unpacked extensions (`--load-extension` fails)**
+  When automating Chrome on Windows via Playwright or Puppeteer, native Chrome installations often silently reject unpacked extensions due to `AutomationControlled` flags. To fix this, do not bind to the native Chrome `channel: 'chrome'`. Instead, use Playwright's bundled Chromium which bypasses this restriction. See the multi-recorder documentation in `README.md`.
+
 - **You need to test many unrelated sites**  
   Use the reusable wildcard config from Live Test. For production-like behavior, use an exact site config from Workspace.
+
+## Replaying Automations with UASL (RAS)
+
+If your extension needs to perform bulk form-filling or record-and-replay tasks, you can leverage the **Unified Automation Script Language (UASL)**.
+UASL (exported as `.ras.json`) uses a **Selector Cascade** (CSS -> XPath -> Shadow DOM -> Text -> Vision API) to guarantee field fills even when the DOM changes.
+
+You can trigger a replay programmatically from your background script by sending a message to the `rover-preview-helper`:
+```js
+chrome.runtime.sendMessage({
+  type: 'FORM_REPLAY_START',
+  tabId: activeTabId,
+  parsedCSV: parsedRasObject // The object output from parseRAS()
+});
+```
+This bypasses fragile single-selector automation and leverages Rover's robust fallback systems.
 
 ## Guardrails
 

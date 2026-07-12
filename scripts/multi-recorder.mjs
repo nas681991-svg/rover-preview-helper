@@ -9,8 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const extensionsDir = path.join(root, 'extensions');
 const bugbugDir = path.join(extensionsDir, 'bugbug');
-const sbaseExtDir = path.join(extensionsDir, 'sbase-recorder');
-const roverExtDir = path.join(root, 'dist');
+const roverExtDir = path.join(root, 'app-assets', 'rover');
+const sbaseExtDir = path.join(root, 'app-assets', 'sbase-recorder');
 
 async function downloadBugbug() {
   if (existsSync(bugbugDir)) {

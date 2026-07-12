@@ -8,11 +8,11 @@
  * Runs in the background service worker (has full network access).
  */
 
-const LLAMAPARSE_API_KEY = 'llx-RO1gFTPHilxaKSlEndZ32Qpz81dOX9gn8diWYSTshCADQMpU';
+const LLAMAPARSE_API_KEY = typeof process !== 'undefined' && process.env ? process.env.LLAMAPARSE_API_KEY : '';
 const LLAMAPARSE_BASE = 'https://api.cloud.llamaindex.ai/api/v1/parsing';
 
-const MINDEE_API_KEY = 'md_19oYM_2LuHROwfBcxPvkGV3T8tUa0mBvnZMg37z0vU0';
-const MINDEE_BASE = 'https://api.mindee.net/v1/products/mindee/invoices/v4/predict';
+const MINDEE_API_KEY = typeof process !== 'undefined' && process.env ? process.env.MINDEE_API_KEY : '';
+const MINDEE_BASE = 'https://api.cloud.mindee.net/v1/products/mindee/invoices/v4/predict';
 
 // ── LlamaParse ───────────────────────────────────────────────────────────────
 
@@ -140,8 +140,10 @@ async function mindeeExtract(pdfBuffer) {
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
   }
   return btoa(binary);
 }
@@ -238,7 +240,7 @@ function mapMindeeToSchema(invoiceData, csvColumns) {
   for (const [key, value] of Object.entries(invoiceData)) {
     if (typeof value === 'object' && !Array.isArray(value)) continue;
     if (Array.isArray(value)) continue;
-    flat[key.toLowerCase().replace(/[_\s-]+/g, ' ')] = String(value);
+    flat[key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().replace(/[_\s-]+/g, ' ')] = String(value);
   }
 
   for (const column of csvColumns) {

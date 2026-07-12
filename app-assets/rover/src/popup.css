@@ -167,6 +167,21 @@ button:disabled {
   color: var(--text);
 }
 
+.upload-button-row {
+  display: flex;
+  gap: 8px;
+}
+
+.upload-button-row.mt-8 {
+  margin-top: 8px;
+}
+
+.upload-label {
+  flex: 1;
+  text-align: center;
+  cursor: pointer;
+}
+
 .help-section {
   padding: 10px 12px;
   border-radius: 8px;
@@ -234,6 +249,7 @@ button:disabled {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 .sessions-header:hover { color: var(--text); }
@@ -310,6 +326,7 @@ button:disabled {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 .diagnostics-header:hover { color: var(--text); }
@@ -427,6 +444,10 @@ button:disabled {
   gap: 6px;
   margin-top: 10px;
 }
+.d-none { display: none; }
+.actions-flex { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.actions-flex-no-mb { display: flex; gap: 8px; flex-wrap: wrap; }
+.fast-mode-label { align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; cursor: pointer; }
 .upload-label {
   display: inline-flex;
   align-items: center;

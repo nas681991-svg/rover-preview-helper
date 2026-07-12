@@ -19,7 +19,6 @@ import {
 import { extractFromPDF, extractFromMultiplePDFs } from './form-recorder/pdf-pipeline.js';
 import { startNetworkCapture, stopNetworkCapture } from './form-recorder/network-capture.js';
 import { generateOpenApiSpec } from './form-recorder/api-spec-generator.js';
-
 // Clean up stale CSP rules from previous sessions on every SW start.
 cleanupOrphanedRules();
 

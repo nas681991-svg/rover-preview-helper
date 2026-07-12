@@ -172,11 +172,12 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
 
     let context = null;
     let launchError = null;
-    const channels = [undefined];
+    const channels = ['chrome', 'msedge', undefined];
 
     for (const channel of channels) {
       try {
         context = await chromium.launchPersistentContext(userDataDir, {
+          channel,
           headless: false,
           acceptDownloads: true,
           downloadsPath: myRecordsPath,

@@ -11,7 +11,7 @@
  * @returns {boolean}
  */
 function isStableId(el) {
-  const id = el.id;
+  const id = el.getAttribute('id');
   if (!id) return false;
   // Reject IDs that look auto-generated (random hex/uuid patterns)
   if (/^[a-f0-9]{8,}$/i.test(id)) return false;
@@ -30,9 +30,14 @@ function buildCssPath(el) {
   const parts = [];
   let current = el;
   while (current && current !== document.body && current !== document.documentElement) {
+    if (!current.tagName) {
+      current = current.parentElement;
+      continue;
+    }
     let segment = current.tagName.toLowerCase();
-    if (current.id && isStableId(current)) {
-      parts.unshift(`#${CSS.escape(current.id)}`);
+    const id = current.getAttribute('id');
+    if (id && isStableId(current)) {
+      parts.unshift(`#${CSS.escape(id)}`);
       break;
     }
     const parent = current.parentElement;
@@ -46,6 +51,13 @@ function buildCssPath(el) {
     parts.unshift(segment);
     current = parent;
   }
+  
+  if (current === document.body && parts.length > 0 && !parts[0].startsWith('#')) {
+    parts.unshift('body');
+  } else if (current === document.documentElement && parts.length > 0 && !parts[0].startsWith('#')) {
+    parts.unshift('html');
+  }
+  
   return parts.join(' > ');
 }
 
@@ -58,9 +70,14 @@ function buildXPath(el) {
   const parts = [];
   let current = el;
   while (current && current.nodeType === Node.ELEMENT_NODE) {
+    if (!current.tagName) {
+      current = current.parentElement;
+      continue;
+    }
     let segment = current.tagName.toLowerCase();
-    if (current.id && isStableId(current)) {
-      parts.unshift(`//*[@id="${current.id}"]`);
+    const id = current.getAttribute('id');
+    if (id && isStableId(current)) {
+      parts.unshift(`//*[@id="${id}"]`);
       return parts.join('/');
     }
     const parent = current.parentElement;
@@ -84,9 +101,14 @@ function buildXPath(el) {
  */
 function findLabelText(el) {
   // 1. Explicit <label for="...">
-  if (el.id) {
-    const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-    if (label) return label.textContent.trim();
+  const id = el.getAttribute('id');
+  if (id) {
+    try {
+      const label = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+      if (label) return label.textContent.trim();
+    } catch {
+      // CSS.escape might fail or invalid selector
+    }
   }
   // 2. Wrapping <label>
   const parent = el.closest('label');
@@ -167,15 +189,17 @@ function extractConstraints(el) {
  */
 export function captureField(el, value, coords = null) {
   const selectors = [];
+  const id = el.getAttribute('id');
+  const name = el.getAttribute('name');
 
   // Priority 1: ID
-  if (el.id && isStableId(el)) {
-    selectors.push(`#${CSS.escape(el.id)}`);
+  if (id && isStableId(el)) {
+    selectors.push(`#${CSS.escape(id)}`);
   }
 
   // Priority 2: name attribute
-  if (el.name) {
-    const nameSelector = `${el.tagName.toLowerCase()}[name="${CSS.escape(el.name)}"]`;
+  if (name) {
+    const nameSelector = `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
     selectors.push(nameSelector);
   }
 
@@ -186,10 +210,14 @@ export function captureField(el, value, coords = null) {
   }
 
   // Priority 4: label[for] -> find input by label
-  if (el.id) {
-    const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-    if (label) {
-      selectors.push(`label[for="${CSS.escape(el.id)}"] ~ input, label[for="${CSS.escape(el.id)}"] ~ select, label[for="${CSS.escape(el.id)}"] ~ textarea`);
+  if (id) {
+    try {
+      const label = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+      if (label) {
+        selectors.push(`label[for="${CSS.escape(id)}"] ~ input, label[for="${CSS.escape(id)}"] ~ select, label[for="${CSS.escape(id)}"] ~ textarea`);
+      }
+    } catch {
+      // Ignore
     }
   }
 
@@ -211,7 +239,7 @@ export function captureField(el, value, coords = null) {
     selectorChain: selectors,
     fieldType: detectFieldType(el),
     label: findLabelText(el),
-    name: el.name || '',
+    name: name || '',
     value: value ?? '',
     options: extractOptions(el),
     constraints: extractConstraints(el),
@@ -229,7 +257,7 @@ export function captureField(el, value, coords = null) {
 
 /**
  * Try to resolve an element using a selectorChain (auto-healing).
- * Returns the first matching element.
+ * Returns the first matching element, piercing Shadow DOM boundaries.
  * @param {string[]} chain
  * @returns {Element|null}
  */
@@ -241,7 +269,7 @@ export function resolveSelector(chain) {
         const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
         if (result.singleNodeValue) return result.singleNodeValue;
       } else {
-        const el = document.querySelector(selector);
+        const el = querySelectorDeep(selector);
         if (el) return el;
       }
     } catch {
@@ -251,5 +279,25 @@ export function resolveSelector(chain) {
   return null;
 }
 
+function querySelectorDeep(selector, root = document) {
+  let el;
+  try {
+    el = root.querySelector(selector);
+    if (el) return el;
+  } catch {
+    // Ignore invalid selector syntax for this root, still check Shadow DOM
+  }
+  
+  const iter = document.createNodeIterator(root, NodeFilter.SHOW_ELEMENT, null, false);
+  let node;
+  while ((node = iter.nextNode())) {
+    if (node.shadowRoot) {
+      const match = querySelectorDeep(selector, node.shadowRoot);
+      if (match) return match;
+    }
+  }
+  return null;
+}
+
 // Re-export utilities for testing
-export { isStableId, buildCssPath, buildXPath, findLabelText, detectFieldType };
+export { isStableId, buildCssPath, buildXPath, findLabelText, detectFieldType, querySelectorDeep };

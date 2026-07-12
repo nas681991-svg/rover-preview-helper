@@ -81,7 +81,7 @@ export function generateTemplate(formMap) {
 
     for (const field of pageFields) {
       const header = deriveColumnName(field, columns.length);
-      const selectorMeta = field.selectorChain.join('|');
+      const selectorMeta = field.selectorChain.map(encodeURIComponent).join('|');
       const coordsMeta = field.coords
         ? `coords:${field.coords.pageX},${field.coords.pageY}`
         : '';
@@ -102,7 +102,7 @@ export function generateTemplate(formMap) {
     // Insert navigation column between pages (not after the last page)
     if (p < pageGroups.length - 1) {
       const nav = navActions.find(n => n.page === p);
-      const navSelector = nav ? nav.selector : '';
+      const navSelector = encodeURIComponent(nav ? nav.selector : '');
       const navCoords = nav?.coords
         ? `coords:${nav.coords.pageX},${nav.coords.pageY}`
         : '';
@@ -117,7 +117,7 @@ export function generateTemplate(formMap) {
   // Build CSV rows
   const headerRow = columns.map(c => escapeCSVField(c.header)).join(',');
   const metadataRow = '# ' + columns.map(c => escapeCSVField(c.metadata)).join(',');
-  const exampleRow = columns.map(c => escapeCSVField(c.exampleValue)).join(',');
+  const exampleRow = '# example: ' + columns.map(c => escapeCSVField(c.exampleValue)).join(',');
 
   return [headerRow, metadataRow, exampleRow, ''].join('\n');
 }
@@ -179,8 +179,8 @@ export function parseCSV(csvText) {
   let metadataLine = null;
   let dataStartIndex = 1;
 
-  if (lines[1].startsWith('# ')) {
-    metadataLine = lines[1].slice(2); // strip "# " prefix
+  if (lines.length > 1 && (lines[1].startsWith('#') || lines[1].startsWith('"#'))) {
+    metadataLine = lines[1];
     dataStartIndex = 2;
   }
 
@@ -192,7 +192,10 @@ export function parseCSV(csvText) {
     const metaFields = parseCSVRow(metadataLine);
     for (let i = 0; i < columns.length && i < metaFields.length; i++) {
       const col = columns[i];
-      const meta = metaFields[i];
+      let meta = metaFields[i];
+      if (i === 0 && meta.startsWith('# ')) {
+        meta = meta.slice(2);
+      }
 
       if (col.startsWith('__NAV_') && col.endsWith('__')) {
         // Navigation column
@@ -201,10 +204,10 @@ export function parseCSV(csvText) {
 
         for (const part of parts) {
           if (part.startsWith('nav:click:')) {
-            navInfo.selector = part.slice('nav:click:'.length);
+            navInfo.selector = decodeURIComponent(part.slice('nav:click:'.length));
           } else if (part.startsWith('coords:')) {
             const [x, y] = part.slice(7).split(',').map(Number);
-            navInfo.coords = { pageX: x, pageY: y };
+            navInfo.coords = { pageX: x || 0, pageY: y || 0 };
           }
         }
         navActions.push(navInfo);
@@ -215,12 +218,12 @@ export function parseCSV(csvText) {
 
         for (const part of parts) {
           if (part.startsWith('selector:')) {
-            fieldInfo.selectorChain = part.slice(9).split('|');
+            fieldInfo.selectorChain = part.slice(9).split('|').map(decodeURIComponent);
           } else if (part.startsWith('type:')) {
             fieldInfo.fieldType = part.slice(5);
           } else if (part.startsWith('coords:')) {
             const [x, y] = part.slice(7).split(',').map(Number);
-            fieldInfo.coords = { pageX: x, pageY: y };
+            fieldInfo.coords = { pageX: x || 0, pageY: y || 0 };
           }
         }
         selectorMap.set(col, fieldInfo);
@@ -231,6 +234,7 @@ export function parseCSV(csvText) {
   // Parse data rows
   const rows = [];
   for (let i = dataStartIndex; i < lines.length; i++) {
+    if (lines[i].trim() === '' || lines[i].startsWith('#') || lines[i].startsWith('"#')) continue;
     const values = parseCSVRow(lines[i]);
     const row = {};
     for (let j = 0; j < columns.length; j++) {

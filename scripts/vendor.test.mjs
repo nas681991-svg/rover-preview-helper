@@ -1,6 +1,12 @@
 import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { vendorBase, vendorTargets, looksLikeRoverRuntime } from './vendor.mjs';
+import { vendorBase, vendorTargets, looksLikeRoverRuntime, vendorSeleniumBaseRecorder } from './vendor.mjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import AdmZip from 'adm-zip';
+import { rm, stat } from 'node:fs/promises';
+
+const rootDir = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 describe('vendor', () => {
   test('vendorBase uses env or default', () => {
@@ -34,5 +40,103 @@ describe('vendor', () => {
     
     const invalidWorker = 'a'.repeat(1024) + 'self.onmessage';
     assert.equal(looksLikeRoverRuntime('worker', invalidWorker), false);
+  });
+});
+
+describe('vendorSeleniumBaseRecorder', () => {
+  const originalFetch = global.fetch;
+  const testDestDir = path.join(rootDir, 'test-sbase-recorder');
+
+  afterEach(async () => {
+    global.fetch = originalFetch;
+    await rm(testDestDir, { recursive: true, force: true });
+  });
+
+  function createMockWheel(candidates) {
+    const wheelZip = new AdmZip();
+    for (const c of candidates) {
+      if (c.notZip) {
+        wheelZip.addFile(c.name, Buffer.from('not a zip file'));
+      } else {
+        const extZip = new AdmZip();
+        if (c.manifest) {
+          extZip.addFile('manifest.json', Buffer.from(JSON.stringify(c.manifest)));
+        }
+        if (c.otherFile) {
+          extZip.addFile(c.otherFile, Buffer.from('content'));
+        }
+        wheelZip.addFile(c.name, extZip.toBuffer());
+      }
+    }
+    return wheelZip.toBuffer();
+  }
+
+  test('fails if PyPI json fetch fails', async () => {
+    global.fetch = async () => ({ ok: false, status: 500 });
+    
+    await assert.rejects(
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      /PyPI returned 500/
+    );
+  });
+
+  test('fails if wheel url not found in json', async () => {
+    global.fetch = async (url) => {
+      if (url.includes('json')) return { ok: true, json: async () => ({ urls: [{ filename: 'test.tar.gz' }] }) };
+    };
+    
+    await assert.rejects(
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      /No \.whl found/
+    );
+  });
+
+  test('fails if wheel download fails', async () => {
+    global.fetch = async (url) => {
+      if (url.includes('json')) return { ok: true, json: async () => ({ urls: [{ filename: 'test.whl', url: 'http://test.whl' }] }) };
+      if (url === 'http://test.whl') return { ok: false, status: 404 };
+    };
+    
+    await assert.rejects(
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      /Wheel download failed with status 404/
+    );
+  });
+
+  test('fails if no valid candidate discovered', async () => {
+    const mockWheel = createMockWheel([
+      { name: 'invalid1.zip', manifest: { name: 'Wrong Name' }, otherFile: 'content.js' },
+      { name: 'no-manifest.zip', otherFile: 'content.js' },
+      { name: 'bad-zip.zip', notZip: true }
+    ]);
+
+    global.fetch = async (url) => {
+      if (url.includes('json')) return { ok: true, json: async () => ({ urls: [{ filename: 'test.whl', url: 'http://test.whl' }] }) };
+      if (url === 'http://test.whl') return { ok: true, arrayBuffer: async () => mockWheel };
+    };
+    
+    await assert.rejects(
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      /No valid recorder extension candidate discovered/
+    );
+  });
+
+  test('extracts successfully when valid candidate is found', async () => {
+    const mockWheel = createMockWheel([
+      { name: 'invalid1.zip', manifest: { name: 'Wrong Name' }, otherFile: 'content.js' },
+      { name: 'valid.zip', manifest: { name: 'SeleniumBase Recorder' }, otherFile: 'background.js' }
+    ]);
+
+    global.fetch = async (url) => {
+      if (url.includes('json')) return { ok: true, json: async () => ({ urls: [{ filename: 'test.whl', url: 'http://test.whl' }] }) };
+      if (url === 'http://test.whl') return { ok: true, arrayBuffer: async () => mockWheel };
+    };
+    
+    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir });
+    
+    const manifestStat = await stat(path.join(testDestDir, 'manifest.json'));
+    assert.ok(manifestStat.isFile());
+    const bgStat = await stat(path.join(testDestDir, 'background.js'));
+    assert.ok(bgStat.isFile());
   });
 });

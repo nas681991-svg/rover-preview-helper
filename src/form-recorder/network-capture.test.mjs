@@ -1,13 +1,14 @@
 import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { startNetworkCapture, stopNetworkCapture } from './network-capture.js';
+import { initializeListeners, setTestOverrides, clearTestOverrides } from './debugger-coordinator.js';
 
 describe('network-capture', () => {
   let listeners = [];
   let attached = new Set();
   let commands = [];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     listeners = [];
     attached.clear();
     commands = [];
@@ -35,13 +36,47 @@ describe('network-capture', () => {
           removeListener: (cb) => {
             listeners = listeners.filter(l => l !== cb);
           }
-        }
-      }
+        },
+        onDetach: { addListener: () => {}, removeListener: () => {} }
+      },
+      tabs: { onRemoved: { addListener: () => {}, removeListener: () => {} } }
     };
+
+    // Mock coordinator functions
+    setTestOverrides({
+      acquire: async (tabId, owner) => {
+        if (tabId === 999) throw new Error('Cannot attach to this target');
+        if (tabId === 998) throw new Error('Some other error');
+        attached.add(tabId);
+        return { tabId, leaseId: `lease_${tabId}`, owner };
+      },
+      send: async (lease, method, params) => {
+        commands.push({ target: { tabId: lease.tabId }, method, params });
+        if (method === 'Network.getResponseBody') {
+          if (params.requestId === 'req-1') return { body: '{"success":true}' };
+          throw new Error('No body available');
+        }
+        return {};
+      },
+      release: async (lease) => {
+        if (lease.tabId === 997) throw new Error('Detach error');
+        attached.delete(lease.tabId);
+      },
+      addEventListener: (owner, fn) => {
+        listeners.push(fn);
+      },
+      removeEventListener: (owner, fn) => {
+        listeners = listeners.filter(l => l !== fn);
+      }
+    });
+    
+    // Initialize listeners after chrome is set up
+    initializeListeners();
   });
 
   afterEach(() => {
     delete globalThis.chrome;
+    clearTestOverrides();
   });
 
   test('startNetworkCapture attaches and enables network', async () => {
@@ -66,8 +101,8 @@ describe('network-capture', () => {
   test('captures requests and fetches response body', async () => {
     await startNetworkCapture(2);
     
-    // Simulate events
-    const cb = listeners[0];
+    // Simulate events (use the last registered listener, which is onEvent)
+    const cb = listeners[listeners.length - 1];
     
     // Request 1: Valid POST
     cb({ tabId: 2 }, 'Network.requestWillBeSent', {

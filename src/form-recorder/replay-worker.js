@@ -12,6 +12,7 @@ const REPLAY_STATE_KEY = 'rover-form-replay:state';
 const FORM_MAPS_KEY = 'rover-form-recorder:maps';
 
 import { locateFieldVisually } from './visual-fallback.js';
+import { acquire, send, release } from './debugger-coordinator.js';
 
 // ── State Management ─────────────────────────────────────────────────────────
 
@@ -94,9 +95,10 @@ async function fillField(tabId, fieldInfo, value) {
  */
 async function fillFieldByCoordinates(tabId, fieldInfo, value) {
   // Try to use provided coords, but if missing we will fall back to visual
+  let lease;
   try {
-    // Attach debugger
-    await chrome.debugger.attach({ tabId }, '1.3');
+    // Acquire lease
+    lease = await acquire(tabId, 'replay-worker');
 
     // Scroll to the coordinate and get viewport-relative x/y
     const scrollResult = await chrome.scripting.executeScript({
@@ -141,10 +143,10 @@ async function fillFieldByCoordinates(tabId, fieldInfo, value) {
     }
 
     // Click at the resolved coordinates
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    await send(lease, 'Input.dispatchMouseEvent', {
       type: 'mousePressed', x, y, button: 'left', clickCount: 1,
     });
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    await send(lease, 'Input.dispatchMouseEvent', {
       type: 'mouseReleased', x, y, button: 'left', clickCount: 1,
     });
 
@@ -153,22 +155,22 @@ async function fillFieldByCoordinates(tabId, fieldInfo, value) {
 
     // Type the value character by character
     for (const char of String(value)) {
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+      await send(lease, 'Input.dispatchKeyEvent', {
         type: 'keyDown', text: char,
       });
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+      await send(lease, 'Input.dispatchKeyEvent', {
         type: 'keyUp', key: char,
       });
       await new Promise(r => setTimeout(r, 50 + Math.random() * 80));
     }
 
-    // Detach debugger
-    await chrome.debugger.detach({ tabId }).catch(() => {});
-
     return { ok: true, method: 'coordinates' };
   } catch (err) {
-    await chrome.debugger.detach({ tabId }).catch(() => {});
     return { ok: false, method: 'coordinates', error: err.message };
+  } finally {
+    if (lease) {
+      await release(lease).catch(() => {});
+    }
   }
 }
 
@@ -185,8 +187,9 @@ async function clickNavigation(tabId, navAction) {
   } catch {
     // Fall back to coordinate click via debugger
     if (navAction.coords?.pageX && navAction.coords?.pageY) {
+      let lease;
       try {
-        await chrome.debugger.attach({ tabId }, '1.3');
+        lease = await acquire(tabId, 'replay-worker');
         const scrollResult = await chrome.scripting.executeScript({
           target: { tabId },
           func: (pageX, pageY) => {
@@ -201,19 +204,21 @@ async function clickNavigation(tabId, navAction) {
         });
         
         const { x, y } = scrollResult[0].result;
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+        await send(lease, 'Input.dispatchMouseEvent', {
           type: 'mousePressed', x, y, button: 'left', clickCount: 1,
         });
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+        await send(lease, 'Input.dispatchMouseEvent', {
           type: 'mouseReleased', x, y, button: 'left', clickCount: 1,
         });
-        await chrome.debugger.detach({ tabId }).catch(() => {});
         // Wait for navigation
         await new Promise(r => setTimeout(r, 2000));
         return { ok: true };
       } catch (err) {
-        await chrome.debugger.detach({ tabId }).catch(() => {});
         return { ok: false, error: err.message };
+      } finally {
+        if (lease) {
+          await release(lease).catch(() => {});
+        }
       }
     }
     return { ok: false, error: 'Navigation click failed' };
