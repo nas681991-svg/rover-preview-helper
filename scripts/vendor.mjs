@@ -203,9 +203,10 @@ export async function vendorSeleniumBaseRecorder(options = {}) {
     version = '4.50.6',
     destDir = path.join(rootDir, 'app-assets', 'sbase-recorder'),
     refresh = true,
+    cacheDir = CACHE_DIR,
   } = options;
 
-  const cacheFile = path.join(CACHE_DIR, `seleniumbase-${version}.whl`);
+  const cacheFile = path.join(cacheDir, `seleniumbase-${version}.whl`);
   const hasCache = await fileExists(cacheFile);
   let wheelBuffer;
 
@@ -232,7 +233,7 @@ export async function vendorSeleniumBaseRecorder(options = {}) {
       }
       
       wheelBuffer = Buffer.from(await wheelRes.arrayBuffer());
-      await mkdir(CACHE_DIR, { recursive: true });
+      await mkdir(cacheDir, { recursive: true });
       await writeFile(cacheFile, wheelBuffer);
     } catch (err) {
       if (!hasCache) {

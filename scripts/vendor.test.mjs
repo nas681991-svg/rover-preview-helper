@@ -46,10 +46,12 @@ describe('vendor', () => {
 describe('vendorSeleniumBaseRecorder', () => {
   const originalFetch = global.fetch;
   const testDestDir = path.join(rootDir, 'test-sbase-recorder');
+  const testCacheDir = path.join(rootDir, 'test-sbase-cache');
 
   afterEach(async () => {
     global.fetch = originalFetch;
     await rm(testDestDir, { recursive: true, force: true });
+    await rm(testCacheDir, { recursive: true, force: true });
   });
 
   function createMockWheel(candidates) {
@@ -75,7 +77,7 @@ describe('vendorSeleniumBaseRecorder', () => {
     global.fetch = async () => ({ ok: false, status: 500 });
     
     await assert.rejects(
-      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, cacheDir: testCacheDir }),
       /PyPI returned 500/
     );
   });
@@ -86,7 +88,7 @@ describe('vendorSeleniumBaseRecorder', () => {
     };
     
     await assert.rejects(
-      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, cacheDir: testCacheDir }),
       /No \.whl found/
     );
   });
@@ -98,7 +100,7 @@ describe('vendorSeleniumBaseRecorder', () => {
     };
     
     await assert.rejects(
-      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, cacheDir: testCacheDir }),
       /Wheel download failed with status 404/
     );
   });
@@ -116,7 +118,7 @@ describe('vendorSeleniumBaseRecorder', () => {
     };
     
     await assert.rejects(
-      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir }),
+      vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, cacheDir: testCacheDir }),
       /No valid recorder extension candidate discovered/
     );
   });
@@ -132,7 +134,7 @@ describe('vendorSeleniumBaseRecorder', () => {
       if (url === 'http://test.whl') return { ok: true, arrayBuffer: async () => mockWheel };
     };
     
-    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir });
+    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, cacheDir: testCacheDir });
     
     const manifestStat = await stat(path.join(testDestDir, 'manifest.json'));
     assert.ok(manifestStat.isFile());
@@ -146,15 +148,14 @@ describe('vendorSeleniumBaseRecorder', () => {
     ]);
     
     // Write fake cache first
-    const { CACHE_DIR } = await import('./vendor.mjs');
     const { mkdir, writeFile } = await import('node:fs/promises');
-    await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(path.join(CACHE_DIR, 'seleniumbase-4.50.6.whl'), mockWheel);
+    await mkdir(testCacheDir, { recursive: true });
+    await writeFile(path.join(testCacheDir, 'seleniumbase-4.50.6.whl'), mockWheel);
     
     // Set network to fail to prove it doesn't use network
     global.fetch = async () => ({ ok: false, status: 500 });
     
-    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, refresh: false });
+    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, refresh: false, cacheDir: testCacheDir });
     
     const bgStat = await stat(path.join(testDestDir, 'cached.js'));
     assert.ok(bgStat.isFile());
@@ -165,15 +166,14 @@ describe('vendorSeleniumBaseRecorder', () => {
       { name: 'valid.zip', manifest: { name: 'SeleniumBase Recorder' }, otherFile: 'fallback.js' }
     ]);
     
-    const { CACHE_DIR } = await import('./vendor.mjs');
     const { mkdir, writeFile } = await import('node:fs/promises');
-    await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(path.join(CACHE_DIR, 'seleniumbase-4.50.6.whl'), mockWheel);
+    await mkdir(testCacheDir, { recursive: true });
+    await writeFile(path.join(testCacheDir, 'seleniumbase-4.50.6.whl'), mockWheel);
     
     // Set network to fail
     global.fetch = async () => ({ ok: false, status: 500 });
     
-    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, refresh: true });
+    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, refresh: true, cacheDir: testCacheDir });
     
     const bgStat = await stat(path.join(testDestDir, 'fallback.js'));
     assert.ok(bgStat.isFile());
