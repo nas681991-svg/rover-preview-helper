@@ -201,42 +201,51 @@ export async function vendorSeleniumBaseRecorder(options = {}) {
   const {
     log = console.log,
     version = '4.50.6',
-    destDir = path.join(rootDir, 'app-assets', 'sbase-recorder')
+    destDir = path.join(rootDir, 'app-assets', 'sbase-recorder'),
+    refresh = true,
   } = options;
 
-  log(`  - Fetching SeleniumBase version ${version} from PyPI...`);
-  const pypiUrl = `https://pypi.org/pypi/seleniumbase/${version}/json`;
-  let response;
-  try {
-    response = await fetch(pypiUrl);
-  } catch (err) {
-    throw new Error(`Failed to vendor SeleniumBase Recorder: Network error fetching ${pypiUrl} - ${err.message}`);
-  }
+  const cacheFile = path.join(CACHE_DIR, `seleniumbase-${version}.whl`);
+  const hasCache = await fileExists(cacheFile);
+  let wheelBuffer;
 
-  if (!response.ok) {
-    throw new Error(`Failed to vendor SeleniumBase Recorder: PyPI returned ${response.status} for version ${version}`);
+  if (refresh || !hasCache) {
+    try {
+      log(`  - Fetching SeleniumBase version ${version} from PyPI...`);
+      const pypiUrl = `https://pypi.org/pypi/seleniumbase/${version}/json`;
+      const response = await fetch(pypiUrl);
+      if (!response.ok) {
+        throw new Error(`PyPI returned ${response.status} for version ${version}`);
+      }
+      
+      const data = await response.json();
+      const wheelUrl = data.urls?.find(u => u.filename.endsWith('.whl'))?.url;
+      
+      if (!wheelUrl) {
+        throw new Error(`No .whl found for version ${version}`);
+      }
+      
+      log(`  - Downloading wheel from ${wheelUrl}...`);
+      const wheelRes = await fetch(wheelUrl);
+      if (!wheelRes.ok) {
+        throw new Error(`Wheel download failed with status ${wheelRes.status}`);
+      }
+      
+      wheelBuffer = Buffer.from(await wheelRes.arrayBuffer());
+      await mkdir(CACHE_DIR, { recursive: true });
+      await writeFile(cacheFile, wheelBuffer);
+    } catch (err) {
+      if (!hasCache) {
+        throw new Error(`Failed to vendor SeleniumBase Recorder: Network error - ${err.message}`);
+      }
+      log(`  ! SeleniumBase: ${err.message} — reusing cached copy.`);
+      wheelBuffer = await readFile(cacheFile);
+    }
+  } else {
+    log(`  - Reusing cached SeleniumBase wheel for version ${version}...`);
+    wheelBuffer = await readFile(cacheFile);
   }
   
-  const data = await response.json();
-  const wheelUrl = data.urls?.find(u => u.filename.endsWith('.whl'))?.url;
-  
-  if (!wheelUrl) {
-    throw new Error(`Failed to vendor SeleniumBase Recorder: No .whl found for version ${version}`);
-  }
-  
-  log(`  - Downloading wheel from ${wheelUrl}...`);
-  let wheelRes;
-  try {
-    wheelRes = await fetch(wheelUrl);
-  } catch (err) {
-    throw new Error(`Failed to vendor SeleniumBase Recorder: Network error downloading wheel from ${wheelUrl} - ${err.message}`);
-  }
-
-  if (!wheelRes.ok) {
-    throw new Error(`Failed to vendor SeleniumBase Recorder: Wheel download failed with status ${wheelRes.status}`);
-  }
-  
-  const wheelBuffer = Buffer.from(await wheelRes.arrayBuffer());
   const wheelZip = new AdmZip(wheelBuffer);
   
   const zipEntries = wheelZip.getEntries().filter(e => e.entryName.endsWith('.zip'));

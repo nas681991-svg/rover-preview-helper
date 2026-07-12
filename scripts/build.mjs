@@ -105,14 +105,7 @@ async function build() {
   await copyTree(path.resolve(rootPath, 'examples'), path.join(distDir, 'examples'));
   await bundleFormRecorder(distDir);
   
-  // Postbuild step: copy the built extension to app-assets/rover
-  // This ensures packaged versions of the Electron app contain a pre-built extension
-  const appAssetsRoverDir = path.resolve(rootPath, 'app-assets', 'rover');
-  await rm(appAssetsRoverDir, { recursive: true, force: true });
-  await copyTree(distDir, appAssetsRoverDir);
-
   console.log(`Built rover-preview-helper -> ${distDir}`);
-  console.log(`Copied extension to -> ${appAssetsRoverDir}`);
 }
 
 if (!watchMode) {

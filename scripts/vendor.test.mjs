@@ -139,4 +139,44 @@ describe('vendorSeleniumBaseRecorder', () => {
     const bgStat = await stat(path.join(testDestDir, 'background.js'));
     assert.ok(bgStat.isFile());
   });
+
+  test('uses cached wheel when refresh is false', async () => {
+    const mockWheel = createMockWheel([
+      { name: 'valid.zip', manifest: { name: 'SeleniumBase Recorder' }, otherFile: 'cached.js' }
+    ]);
+    
+    // Write fake cache first
+    const { CACHE_DIR } = await import('./vendor.mjs');
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    await mkdir(CACHE_DIR, { recursive: true });
+    await writeFile(path.join(CACHE_DIR, 'seleniumbase-4.50.6.whl'), mockWheel);
+    
+    // Set network to fail to prove it doesn't use network
+    global.fetch = async () => ({ ok: false, status: 500 });
+    
+    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, refresh: false });
+    
+    const bgStat = await stat(path.join(testDestDir, 'cached.js'));
+    assert.ok(bgStat.isFile());
+  });
+
+  test('uses cached wheel when refresh is true but network fails', async () => {
+    const mockWheel = createMockWheel([
+      { name: 'valid.zip', manifest: { name: 'SeleniumBase Recorder' }, otherFile: 'fallback.js' }
+    ]);
+    
+    const { CACHE_DIR } = await import('./vendor.mjs');
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    await mkdir(CACHE_DIR, { recursive: true });
+    await writeFile(path.join(CACHE_DIR, 'seleniumbase-4.50.6.whl'), mockWheel);
+    
+    // Set network to fail
+    global.fetch = async () => ({ ok: false, status: 500 });
+    
+    await vendorSeleniumBaseRecorder({ log: () => {}, destDir: testDestDir, refresh: true });
+    
+    const bgStat = await stat(path.join(testDestDir, 'fallback.js'));
+    assert.ok(bgStat.isFile());
+  });
+
 });
