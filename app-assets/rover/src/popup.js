@@ -122,19 +122,7 @@ async function loadPersistedConfig() {
 }
 
 injectBtn.addEventListener('click', async () => {
-  if (window.pendingReplayIntent) {
-    const tab = await getActiveTab();
-    if (!tab?.id) return;
-    chrome.runtime.sendMessage({
-      type: 'FORM_REPLAY_START',
-      tabId: tab.id,
-      formMapId: currentFormMap.id,
-      fastMode: window.pendingReplayIntent.fastMode,
-      parsedCSV: window.pendingReplayIntent.parsedCSV,
-    });
-    window.pendingReplayIntent = null;
-    return;
-  }
+
 
   injectBtn.disabled = true;
   reconnectBtn.disabled = true;
@@ -530,7 +518,7 @@ if (uploadCsvInput) {
     let parsed;
     try {
       parsed = parseCSV(text);
-      fastModeContainer.classList.remove('d-none');
+      if (fastModeContainer) fastModeContainer.style.display = 'flex';
     } catch (err) {
       setStatus(`CSV Error: ${err.message}`, true);
       return;
@@ -568,7 +556,7 @@ if (uploadRasInput) {
     let parsed;
     try {
       parsed = parseRAS(text);
-      fastModeContainer.classList.remove('d-none');
+      if (fastModeContainer) fastModeContainer.style.display = 'flex';
     } catch (err) {
       setStatus(`RAS Error: ${err.message}`, true);
       return;
@@ -585,7 +573,7 @@ if (uploadRasInput) {
       fastMode: fastModeCheckbox && fastModeCheckbox.checked,
       parsedCSV: {
         columns: parsed.columns,
-        selectorMap: {},
+        selectorMap: parsed.selectorMap || {},
         rows: parsed.rows,
         navActions: parsed.navActions
       },

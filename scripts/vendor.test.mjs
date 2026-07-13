@@ -4,7 +4,8 @@ import { vendorBase, vendorTargets, looksLikeRoverRuntime, vendorSeleniumBaseRec
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import AdmZip from 'adm-zip';
-import { rm, stat } from 'node:fs/promises';
+import { rm, stat, mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
 
 const rootDir = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -45,13 +46,18 @@ describe('vendor', () => {
 
 describe('vendorSeleniumBaseRecorder', () => {
   const originalFetch = global.fetch;
-  const testDestDir = path.join(rootDir, 'test-sbase-recorder');
-  const testCacheDir = path.join(rootDir, 'test-sbase-cache');
+  let testDestDir;
+  let testCacheDir;
+
+  beforeEach(async () => {
+    testDestDir = await mkdtemp(path.join(os.tmpdir(), 'sbase-recorder-'));
+    testCacheDir = await mkdtemp(path.join(os.tmpdir(), 'sbase-cache-'));
+  });
 
   afterEach(async () => {
     global.fetch = originalFetch;
-    await rm(testDestDir, { recursive: true, force: true });
-    await rm(testCacheDir, { recursive: true, force: true });
+    await rm(testDestDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    await rm(testCacheDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   function createMockWheel(candidates) {

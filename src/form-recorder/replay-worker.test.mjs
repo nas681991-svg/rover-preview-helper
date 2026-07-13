@@ -218,6 +218,36 @@ describe('replay-worker', () => {
     assert.match(res.results[0].errorReason, /Test: Err/);
   });
 
+  test('Fast Mode payload keying uses name instead of label', async () => {
+    const parsedCSV = {
+      columns: [], selectorMap: new Map(), navActions: [],
+      rows: [ { 'Email Address': 'user@example.com' } ]
+    };
+    const formMap = { 
+      id: 'form1', startUrl: 'http://t',
+      apiSpec: {
+        paths: { '/api/submit': { post: {} } },
+        servers: [{ url: 'http://api' }]
+      },
+      fields: [{ name: 'email', label: 'Email Address', page: 0 }]
+    };
+
+    let fetchArgs = null;
+    globalThis.fetch = async (url, opts) => {
+      fetchArgs = { url, opts };
+      return { ok: true, status: 200 };
+    };
+
+    const res = await startReplay(1, formMap, parsedCSV, true); // fastMode = true
+
+    assert.equal(res.status, 'complete');
+    assert.ok(fetchArgs, 'fetch should have been called');
+    assert.equal(fetchArgs.url, 'http://api/api/submit');
+    
+    const payload = JSON.parse(fetchArgs.opts.body);
+    assert.deepStrictEqual(payload, { email: 'user@example.com' });
+  });
+
   test('cancelReplay stops loop', async () => {
     const parsedCSV = { rows: [ { 'F1': 'val1' }, { 'F1': 'val2' } ] };
     const formMap = { id: 'form1', fields: [{ label: 'F1' }] };

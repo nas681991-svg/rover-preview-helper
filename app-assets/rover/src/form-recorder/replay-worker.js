@@ -13,6 +13,7 @@ const FORM_MAPS_KEY = 'rover-form-recorder:maps';
 
 import { locateFieldVisually } from './visual-fallback.js';
 import { acquire, send, release } from './debugger-coordinator.js';
+import { resolveBundle } from '../shared.js';
 
 // ── State Management ─────────────────────────────────────────────────────────
 
@@ -66,10 +67,11 @@ export async function listFormMaps() {
  * Inject the replay-bundle.js content script into a tab.
  */
 async function injectReplayEngine(tabId) {
+  const bundlePath = await resolveBundle('src/form-recorder/replay-bundle.js');
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: false },
     world: 'ISOLATED',
-    files: ['src/form-recorder/replay-bundle.js'],
+    files: [bundlePath],
   });
 }
 

@@ -74,8 +74,8 @@ export function generateRAS(formMap) {
         action: "fill_field",
         data_source: `$schema.${varName}`,
         selectors: {
-          primary: f.selectorChain[f.selectorChain.length - 1],
-          shadow_dom_path: f.selectorChain,
+          primary: f.selectorChain && f.selectorChain.length > 0 ? f.selectorChain[f.selectorChain.length - 1] : f.selector,
+          shadow_dom_path: f.selectorChain || (f.selector ? [f.selector] : []),
           heuristic: f.name || f.id,
           coordinates: f.coords ? { x: f.coords.pageX, y: f.coords.pageY } : null
         }
@@ -85,13 +85,16 @@ export function generateRAS(formMap) {
     // Add navigation action for this page, if any
     const navs = navActions.filter(n => n.page === p);
     navs.forEach(nav => {
+      const selectors = {
+        primary: nav.selector,
+        coordinates: nav.coords ? { x: nav.coords.pageX, y: nav.coords.pageY } : null
+      };
+      if (nav.selector) {
+        selectors.shadow_dom_path = [nav.selector];
+      }
       script.steps.push({
         action: "click",
-        selectors: {
-          primary: nav.selectorChain[nav.selectorChain.length - 1],
-          shadow_dom_path: nav.selectorChain,
-          coordinates: nav.coords ? { x: nav.coords.pageX, y: nav.coords.pageY } : null
-        }
+        selectors
       });
     });
   }
@@ -128,10 +131,40 @@ export function parseRAS(rasText) {
     rowData[col] = schemaDef ? schemaDef.exampleValue : "";
   });
 
+  const selectorMap = {};
+  const navActions = [];
+  let currentPage = 0;
+
+  script.steps.forEach(step => {
+    if (step.action === "wait" && step.condition === "dom_stability") {
+      currentPage++;
+    } else if (step.action === "fill_field") {
+      const colMatch = step.data_source?.match(/^\$schema\.(.+)$/);
+      if (colMatch) {
+        const colName = colMatch[1];
+        const schemaEntry = script.schema.find(s => s.field === colName);
+        const fieldType = schemaEntry?.type === 'boolean' ? 'checkbox' : 'text';
+        
+        selectorMap[colName] = {
+          selectorChain: step.selectors?.shadow_dom_path || [step.selectors?.primary],
+          fieldType,
+          coords: step.selectors?.coordinates ? { pageX: step.selectors.coordinates.x, pageY: step.selectors.coordinates.y } : null
+        };
+      }
+    } else if (step.action === "click") {
+      navActions.push({
+        selector: step.selectors?.primary,
+        coords: step.selectors?.coordinates ? { pageX: step.selectors.coordinates.x, pageY: step.selectors.coordinates.y } : null,
+        page: currentPage,
+        type: '__NAV__'
+      });
+    }
+  });
+
   return {
     columns,
-    selectorMap: {}, // To be fully compliant, we'd reverse-map steps to selectorMap
+    selectorMap,
     rows: [rowData],
-    navActions: []
+    navActions
   };
 }

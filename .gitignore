@@ -12,6 +12,9 @@ release/
 
 # Ignore test artifacts
 .playwright-userDataDir/
+test-sbase-cache/
+test-sbase-recorder/
+test-dist/
 .playwright-gui-test/
 extensions/
 .env

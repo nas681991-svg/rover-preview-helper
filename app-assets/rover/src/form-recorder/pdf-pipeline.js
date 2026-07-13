@@ -8,10 +8,10 @@
  * Runs in the background service worker (has full network access).
  */
 
-const LLAMAPARSE_API_KEY = typeof process !== 'undefined' && process.env ? process.env.LLAMAPARSE_API_KEY : '';
+const getLlamaParseKey = () => typeof process !== 'undefined' && process.env ? process.env.LLAMAPARSE_API_KEY : '';
 const LLAMAPARSE_BASE = 'https://api.cloud.llamaindex.ai/api/v1/parsing';
 
-const MINDEE_API_KEY = typeof process !== 'undefined' && process.env ? process.env.MINDEE_API_KEY : '';
+const getMindeeKey = () => typeof process !== 'undefined' && process.env ? process.env.MINDEE_API_KEY : '';
 const MINDEE_BASE = 'https://api.cloud.mindee.net/v1/products/mindee/invoices/v4/predict';
 
 // ── LlamaParse ───────────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ async function llamaParseExtract(pdfBuffer) {
   const uploadResponse = await fetch(`${LLAMAPARSE_BASE}/upload`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${LLAMAPARSE_API_KEY}`,
+      'Authorization': `Bearer ${getLlamaParseKey()}`,
       'Accept': 'application/json',
     },
     body: formData,
@@ -53,7 +53,7 @@ async function llamaParseExtract(pdfBuffer) {
 
     const statusResponse = await fetch(`${LLAMAPARSE_BASE}/job/${jobId}`, {
       headers: {
-        'Authorization': `Bearer ${LLAMAPARSE_API_KEY}`,
+        'Authorization': `Bearer ${getLlamaParseKey()}`,
         'Accept': 'application/json',
       },
     });
@@ -65,7 +65,7 @@ async function llamaParseExtract(pdfBuffer) {
       // 3. Fetch the markdown result
       const resultResponse = await fetch(`${LLAMAPARSE_BASE}/job/${jobId}/result/markdown`, {
         headers: {
-          'Authorization': `Bearer ${LLAMAPARSE_API_KEY}`,
+          'Authorization': `Bearer ${getLlamaParseKey()}`,
           'Accept': 'application/json',
         },
       });
@@ -100,7 +100,7 @@ async function mindeeExtract(pdfBuffer) {
   const response = await fetch(MINDEE_BASE, {
     method: 'POST',
     headers: {
-      'Authorization': `Token ${MINDEE_API_KEY}`,
+      'Authorization': `Token ${getMindeeKey()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -278,6 +278,10 @@ function mapMindeeToSchema(invoiceData, csvColumns) {
  * @returns {Promise<{ rows: Object[], source: string }>}
  */
 export async function extractFromPDF(pdfBuffer, csvColumns) {
+  if (!getLlamaParseKey() && !getMindeeKey()) {
+    throw new Error('No PDF extraction API keys configured. Please provide LLAMAPARSE_API_KEY or MINDEE_API_KEY.');
+  }
+
   let rows = [];
   let source = '';
 

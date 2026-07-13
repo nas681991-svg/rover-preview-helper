@@ -111,6 +111,8 @@ describe('recorder', () => {
     assert.equal(res.fields[0].value, 'John');
     assert.equal(res.fields[0].coords.x, 50); // From mouse X
     assert.equal(res.fields[0].coords.y, 60); // From mouse Y
+    assert.equal(res.fields[0].coords.pageX, 70); // Computed from rect
+    assert.equal(res.fields[0].coords.pageY, 20); // Computed from rect
 
     assert.equal(res.navActions.length, 1);
     assert.equal(res.navActions[0].buttonText, 'Next');

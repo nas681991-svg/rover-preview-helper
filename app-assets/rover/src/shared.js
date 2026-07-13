@@ -378,3 +378,26 @@ export function validateConfigInput(cfg) {
 
   return issues;
 }
+
+/**
+ * Resolves the path to an extension bundle dynamically.
+ * Supports loading from the built extension (dist/ or app-assets/)
+ * or the repository root in dev mode.
+ */
+export async function resolveBundle(bundlePath) {
+  const paths = [
+    bundlePath,          // Built artifact context
+    `dist/${bundlePath}` // Dev repo root context
+  ];
+
+  for (const p of paths) {
+    try {
+      const res = await fetch(chrome.runtime.getURL(p));
+      if (res.ok) return p;
+    } catch {
+      // Ignore and try the next path
+    }
+  }
+
+  throw new Error(`Required extension bundle '${bundlePath}' not found. Please build the extension artifact (e.g. via 'pnpm build' or 'pnpm dev') before running.`);
+}

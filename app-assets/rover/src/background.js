@@ -9,6 +9,7 @@ import {
   STATUS_KEY_PREFIX,
   STORAGE_KEY_PREFIX,
   stripPreviewLaunchParams,
+  resolveBundle,
 } from './shared.js';
 import { enableCspBypass, disableCspBypass, cleanupOrphanedRules } from './csp-bypass.js';
 import { logDiagnostic } from './diagnostics.js';
@@ -637,10 +638,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = Number(message.tabId);
     void (async () => {
       try {
+        const bundlePath = await resolveBundle('src/form-recorder/recorder-bundle.js');
         await chrome.scripting.executeScript({
           target: { tabId, allFrames: false },
           world: 'ISOLATED',
-          files: ['src/form-recorder/recorder-bundle.js'],
+          files: [bundlePath],
         });
         
         // Start CDP network capture for API spec generation

@@ -7,6 +7,8 @@ test('resolveLaunchPlan', async (t) => {
     extDataDir: '/ext-data',
     bugbugDir: '/ext-data/bugbug',
     sbaseExtDir: '/ext-data/sbase',
+    cloudqaDir: '/ext-data/cloudqa',
+    fillappDir: '/ext-data/fillapp',
     roverExtDir: '/app-assets/rover',
     devDist: '/dist',
     existsSync: (path) => path !== '/ext-data/sbase', // let's pretend sbase is missing
@@ -16,25 +18,44 @@ test('resolveLaunchPlan', async (t) => {
   await t.test('all mode', () => {
     const plan = resolveLaunchPlan('all', env);
     assert.strictEqual(plan.error, null);
-    assert.strictEqual(plan.targetSources.length, 1);
-    assert.strictEqual(plan.targetSources[0].id, 'bugbug');
-    assert.strictEqual(plan.extensions.length, 2); // rover, bugbug
+    const sourceIds = plan.targetSources.map(s => s.id).sort();
+    assert.deepStrictEqual(sourceIds, ['bugbug', 'cloudqa', 'fillapp']);
+    const extIds = plan.extensions.map(e => e.id).sort();
+    assert.deepStrictEqual(extIds, ['bugbug', 'cloudqa', 'fillapp', 'rover']);
     assert.strictEqual(plan.missingRequired.length, 0);
-    assert.strictEqual(plan.warnings.length, 0);
+    assert.strictEqual(plan.warnings.length, 1);
+    assert.ok(plan.warnings[0].includes('seleniumbase'));
   });
 
   await t.test('all mode newly acquired extension included in final launch list', () => {
     const customEnv = {
       ...env,
-      existsSync: (path) => path !== '/ext-data/bugbug' // bugbug missing initially
+      existsSync: (path) => path !== '/ext-data/bugbug' && path !== '/ext-data/sbase' // bugbug and sbase missing initially
     };
     const plan = resolveLaunchPlan('all', customEnv);
     assert.strictEqual(plan.error, null);
-    assert.strictEqual(plan.targetSources.length, 1);
-    assert.strictEqual(plan.targetSources[0].id, 'bugbug');
-    assert.strictEqual(plan.extensions.length, 2); // rover and bugbug (because bugbug is downloadable)
+    const sourceIds = plan.targetSources.map(s => s.id).sort();
+    assert.deepStrictEqual(sourceIds, ['bugbug', 'cloudqa', 'fillapp']);
+    const extIds = plan.extensions.map(e => e.id).sort();
+    assert.deepStrictEqual(extIds, ['bugbug', 'cloudqa', 'fillapp', 'rover']);
     assert.strictEqual(plan.missingRequired.length, 0);
-    assert.strictEqual(plan.warnings.length, 0); // No warning for bugbug since it's downloadable
+    assert.strictEqual(plan.warnings.length, 1); // Warning for seleniumbase, none for bugbug/cloudqa/fillapp
+    assert.ok(plan.warnings[0].includes('seleniumbase'));
+  });
+
+  await t.test('all mode with seleniumbase present', () => {
+    const customEnv = {
+      ...env,
+      existsSync: () => true // Everything is present
+    };
+    const plan = resolveLaunchPlan('all', customEnv);
+    assert.strictEqual(plan.error, null);
+    const sourceIds = plan.targetSources.map(s => s.id).sort();
+    assert.deepStrictEqual(sourceIds, ['bugbug', 'cloudqa', 'fillapp']);
+    const extIds = plan.extensions.map(e => e.id).sort();
+    assert.deepStrictEqual(extIds, ['bugbug', 'cloudqa', 'fillapp', 'rover', 'seleniumbase']);
+    assert.strictEqual(plan.missingRequired.length, 0);
+    assert.strictEqual(plan.warnings.length, 0);
   });
 
   await t.test('rover mode', () => {
@@ -43,6 +64,69 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.targetSources.length, 0);
     assert.strictEqual(plan.extensions.length, 1);
     assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('cloudqa mode', () => {
+    const plan = resolveLaunchPlan('cloudqa', env);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.targetSources.length, 1);
+    assert.strictEqual(plan.extensions.length, 1);
+    assert.strictEqual(plan.extensions[0].id, 'cloudqa');
+    assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('cloudqa mode downloadable-when-absent', () => {
+    const customEnv = {
+      ...env,
+      existsSync: (path) => path !== '/ext-data/cloudqa' && path !== '/ext-data/sbase' // cloudqa missing
+    };
+    const plan = resolveLaunchPlan('cloudqa', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.ok(plan.targetSources.some(s => s.id === 'cloudqa'));
+    assert.ok(plan.extensions.some(e => e.id === 'cloudqa'));
+    assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('fillapp mode', () => {
+    const plan = resolveLaunchPlan('fillapp', env);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.targetSources.length, 1);
+    assert.strictEqual(plan.extensions.length, 1);
+    assert.strictEqual(plan.extensions[0].id, 'fillapp');
+    assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('fillapp mode downloadable-when-absent', () => {
+    const customEnv = {
+      ...env,
+      existsSync: (path) => path !== '/ext-data/fillapp' && path !== '/ext-data/sbase' // fillapp missing
+    };
+    const plan = resolveLaunchPlan('fillapp', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.ok(plan.targetSources.some(s => s.id === 'fillapp'));
+    assert.ok(plan.extensions.some(e => e.id === 'fillapp'));
+    assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('seleniumbase mode present', () => {
+    const customEnv = {
+      ...env,
+      existsSync: () => true // sbase present
+    };
+    const plan = resolveLaunchPlan('seleniumbase', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.ok(plan.extensions.some(e => e.id === 'seleniumbase'));
+    assert.strictEqual(plan.targetSources.some(s => s.id === 'seleniumbase'), false);
+    assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('seleniumbase mode fail-loud (not downloadable)', () => {
+    const plan = resolveLaunchPlan('seleniumbase', env);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.targetSources.length, 0);
+    assert.strictEqual(plan.extensions.length, 0); // because env.existsSync is false for sbase
+    assert.strictEqual(plan.missingRequired.length, 1);
+    assert.strictEqual(plan.missingRequired[0], 'seleniumbase');
   });
 
   await t.test('bugbug mode', () => {
@@ -76,6 +160,19 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.extensions.length, 0);
     assert.strictEqual(plan.missingRequired.length, 1);
     assert.strictEqual(plan.missingRequired[0], 'rover');
+  });
+
+  await t.test('all mode missing rover fail-loud', () => {
+    const customEnv = {
+      ...env,
+      existsSync: (path) => path !== '/app-assets/rover' && path !== '/ext-data/sbase' // simulate missing rover and sbase
+    };
+    const plan = resolveLaunchPlan('all', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.missingRequired.length, 1);
+    assert.strictEqual(plan.missingRequired[0], 'rover');
+    assert.strictEqual(plan.warnings.some(w => w.includes('rover')), false);
+    assert.strictEqual(plan.warnings.some(w => w.includes('seleniumbase')), true);
   });
 
   await t.test('playwright-trace mode', () => {
