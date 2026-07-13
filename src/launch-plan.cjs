@@ -4,18 +4,6 @@ const EXTENSION_SOURCES = [
     name: 'Bugbug',
     url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc',
     isCrx: true,
-  },
-  {
-    id: 'cloudqa',
-    name: 'CloudQA',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Djndmknkiojkfghnndgndgmjmhkahiggo%26uc',
-    isCrx: true,
-  },
-  {
-    id: 'fillapp',
-    name: 'FillApp',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Dfillapp_placeholder_id%26uc',
-    isCrx: true,
   }
 ];
 
@@ -51,9 +39,6 @@ function resolveLaunchPlan(mode, env) {
   if (mode === 'all') {
     toLoad.push({ id: 'rover', dir: env.roverExtDir });
     toLoad.push({ id: 'bugbug', dir: env.bugbugDir });
-    toLoad.push({ id: 'seleniumbase', dir: env.sbaseExtDir });
-    toLoad.push({ id: 'fillapp', dir: env.fillappDir });
-    toLoad.push({ id: 'cloudqa', dir: env.cloudqaDir });
   } else if (mode === 'rover') {
     toLoad.push({ id: 'rover', dir: env.roverExtDir });
   } else if (mode === 'form-recorder') {
@@ -69,7 +54,8 @@ function resolveLaunchPlan(mode, env) {
 
   // Validate presence and categorize
   for (const ext of toLoad) {
-    if (env.existsSync(ext.dir)) {
+    const isDownloadable = plan.targetSources.some(ts => ts.id === ext.id);
+    if (isDownloadable || env.existsSync(ext.dir)) {
       plan.extensions.push(ext);
     } else {
       if (mode === 'all') {
@@ -161,8 +147,11 @@ async function acquireExtension(source, sys) {
     const metaPath = sys.pathJoin ? sys.pathJoin(source.extractDir, '..', `${source.id}_meta.json`) : source.extractDir + '_meta.json';
     const metadata = {
       id: source.id,
+      name: source.name,
       url: source.url,
-      downloadedAt: new Date().toISOString()
+      manifestVersion: manifest.manifest_version,
+      downloadedAt: new Date().toISOString(),
+      sourceType: source.isCrx ? 'crx' : 'zip'
     };
     if (sys.writeFileSync) {
       sys.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));

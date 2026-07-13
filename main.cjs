@@ -9,8 +9,6 @@ const isWin = process.platform === 'win32';
 
 const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
 const bugbugDir = path.join(extDataDir, 'bugbug');
-const fillappDir = path.join(extDataDir, 'fillapp');
-const cloudqaDir = path.join(extDataDir, 'cloudqa');
 
 const { resolveLaunchPlan, acquireExtension } = require('./src/launch-plan.cjs');
 
@@ -72,7 +70,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     fs.mkdirSync(extDataDir, { recursive: true });
 
     const env = {
-      extDataDir, bugbugDir, sbaseExtDir, fillappDir, cloudqaDir, roverExtDir,
+      extDataDir, bugbugDir, sbaseExtDir, roverExtDir,
       devDist: path.join(__dirname, 'dist'),
       existsSync: fs.existsSync,
       pathJoin: path.join
@@ -124,7 +122,19 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       }
     }
 
-    const finalExtensions = plan.extensions.map(ext => ext.dir);
+    const finalExtensions = [];
+    for (const ext of plan.extensions) {
+      if (fs.existsSync(ext.dir)) {
+        finalExtensions.push(ext.dir);
+      } else {
+        if (mode === 'all') {
+          console.warn(`[WARN] Extension '${ext.id}' remains unavailable after acquisition attempt.`);
+        } else {
+          launchInProgress = false;
+          return `Error: Required extension '${ext.id}' is missing after acquisition attempt.`;
+        }
+      }
+    }
     const extensionsStr = finalExtensions.join(',');
 
     const userDataDir = path.join(app.getPath('userData'), 'browser-data');

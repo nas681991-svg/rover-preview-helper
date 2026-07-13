@@ -20,10 +20,23 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.error, null);
     assert.strictEqual(plan.targetSources.length, 1);
     assert.strictEqual(plan.targetSources[0].id, 'bugbug');
-    assert.strictEqual(plan.extensions.length, 4); // rover, bugbug, fillapp, cloudqa are present (sbase is missing)
+    assert.strictEqual(plan.extensions.length, 2); // rover, bugbug
     assert.strictEqual(plan.missingRequired.length, 0);
-    assert.strictEqual(plan.warnings.length, 1);
-    assert.strictEqual(plan.warnings[0], "Extension 'seleniumbase' is unavailable at /ext-data/sbase.");
+    assert.strictEqual(plan.warnings.length, 0);
+  });
+
+  await t.test('all mode newly acquired extension included in final launch list', () => {
+    const customEnv = {
+      ...env,
+      existsSync: (path) => path !== '/ext-data/bugbug' // bugbug missing initially
+    };
+    const plan = resolveLaunchPlan('all', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.targetSources.length, 1);
+    assert.strictEqual(plan.targetSources[0].id, 'bugbug');
+    assert.strictEqual(plan.extensions.length, 2); // rover and bugbug (because bugbug is downloadable)
+    assert.strictEqual(plan.missingRequired.length, 0);
+    assert.strictEqual(plan.warnings.length, 0); // No warning for bugbug since it's downloadable
   });
 
   await t.test('rover mode', () => {
@@ -40,6 +53,19 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.targetSources.length, 1);
     assert.strictEqual(plan.extensions.length, 1);
     assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('bugbug mode missing initially (is Downloadable)', () => {
+    const customEnv = {
+      ...env,
+      existsSync: (path) => path !== '/ext-data/bugbug' // bugbug missing initially
+    };
+    const plan = resolveLaunchPlan('bugbug', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.targetSources.length, 1);
+    assert.strictEqual(plan.extensions.length, 1);
+    assert.strictEqual(plan.extensions[0].id, 'bugbug');
+    assert.strictEqual(plan.missingRequired.length, 0); // NOT marked missing required because it's downloadable
   });
 
   await t.test('missing required mode fail-loud', () => {
@@ -151,18 +177,36 @@ test('acquireExtension validation', async (t) => {
   });
 
   await t.test('succeeds for valid zip and writes metadata', async () => {
+    let writtenPath = null;
+    let writtenData = null;
     const sys = {
       ...baseSys,
       fetch: async () => ({
         ok: true,
         headers: new Headers({ 'content-type': 'application/octet-stream' }),
         arrayBuffer: async () => new ArrayBuffer(10)
-      })
+      }),
+      writeFileSync: (p, data) => {
+        if (p.includes('_meta.json')) {
+          writtenPath = p;
+          writtenData = data;
+        } else {
+          writeCalled = true;
+        }
+      }
     };
-    await acquireExtension({ url: 'http://foo', destZip: '/foo.crx', extractDir: '/foo' }, sys);
+    await acquireExtension({ id: 'foo', name: 'FooExt', isCrx: true, url: 'http://foo', destZip: '/foo.crx', extractDir: '/foo' }, sys);
     assert.strictEqual(mkdirCalled, true);
     assert.strictEqual(writeCalled, true);
     assert.strictEqual(renameCalled, true);
     assert.strictEqual(extracted, true);
+    assert.ok(writtenPath);
+    const meta = JSON.parse(writtenData);
+    assert.strictEqual(meta.id, 'foo');
+    assert.strictEqual(meta.name, 'FooExt');
+    assert.strictEqual(meta.url, 'http://foo');
+    assert.strictEqual(meta.manifestVersion, 3);
+    assert.strictEqual(meta.sourceType, 'crx');
+    assert.ok(meta.downloadedAt);
   });
 });
