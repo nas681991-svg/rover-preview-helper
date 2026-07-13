@@ -7,8 +7,6 @@ test('resolveLaunchPlan', async (t) => {
     extDataDir: '/ext-data',
     bugbugDir: '/ext-data/bugbug',
     sbaseExtDir: '/ext-data/sbase',
-    fillappDir: '/ext-data/fillapp',
-    cloudqaDir: '/ext-data/cloudqa',
     roverExtDir: '/app-assets/rover',
     devDist: '/dist',
     existsSync: (path) => path !== '/ext-data/sbase', // let's pretend sbase is missing

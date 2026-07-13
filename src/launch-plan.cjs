@@ -9,8 +9,8 @@ const EXTENSION_SOURCES = [
 
 /**
  * Resolves the launch plan for the given mode.
- * @param {string} mode - The launch mode (e.g. 'all', 'rover', 'bugbug', 'form-recorder', 'seleniumbase', 'playwright-trace').
- * @param {object} env - The environment context { extDataDir, bugbugDir, sbaseExtDir, fillappDir, cloudqaDir, roverExtDir, devDist, existsSync, pathJoin }.
+ * @param {string} mode - The launch mode (e.g. 'all', 'rover', 'bugbug', 'form-recorder', 'playwright-trace').
+ * @param {object} env - The environment context { extDataDir, bugbugDir, sbaseExtDir, roverExtDir, devDist, existsSync, pathJoin }.
  * @returns {object} plan - { targetSources: Array, extensions: Array, error: string|null }
  */
 function resolveLaunchPlan(mode, env) {
