@@ -1,11 +1,11 @@
-import test, { describe } from 'node:test';
+import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { 
   readCurrentTabId, normalizeHost, normalizeAllowedDomains,
   isHostAllowed, normalizeConfig, extractPreviewLaunchParams,
   hasHelperConfigFragment, extractHelperConfigFragment,
   stripPreviewLaunchParams, buildLaunchUrl, validateConfigInput,
-  encodeHelperConfigFragment
+  encodeHelperConfigFragment, resolveBundle
 } from './shared.js';
 
 describe('shared', () => {
@@ -110,5 +110,59 @@ describe('shared', () => {
 
     issues = validateConfigInput({ siteId: '1', publicKey: 'pk_123', allowedDomains: 'foo.com' });
     assert.ok(issues.some(i => i.message.includes('allowedDomains should be an array')));
+  });
+});
+
+describe('resolveBundle', () => {
+  const originalChrome = globalThis.chrome;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.chrome = {
+      runtime: {
+        getURL: (path) => `chrome-extension://mock-id/${path}`
+      }
+    };
+  });
+
+  afterEach(() => {
+    globalThis.chrome = originalChrome;
+    globalThis.fetch = originalFetch;
+  });
+
+  test('built extension root path works', async () => {
+    globalThis.fetch = async (url) => {
+      if (url === 'chrome-extension://mock-id/src/form-recorder/recorder-bundle.js') {
+        return { ok: true };
+      }
+      return { ok: false };
+    };
+
+    const resolved = await resolveBundle('src/form-recorder/recorder-bundle.js');
+    assert.equal(resolved, 'src/form-recorder/recorder-bundle.js');
+  });
+
+  test('dev repo-root fallback works', async () => {
+    globalThis.fetch = async (url) => {
+      if (url === 'chrome-extension://mock-id/src/form-recorder/recorder-bundle.js') {
+        return { ok: false };
+      }
+      if (url === 'chrome-extension://mock-id/dist/src/form-recorder/recorder-bundle.js') {
+        return { ok: true };
+      }
+      return { ok: false };
+    };
+
+    const resolved = await resolveBundle('src/form-recorder/recorder-bundle.js');
+    assert.equal(resolved, 'dist/src/form-recorder/recorder-bundle.js');
+  });
+
+  test('missing bundle throws a clear actionable error', async () => {
+    globalThis.fetch = async () => ({ ok: false });
+
+    await assert.rejects(
+      resolveBundle('src/form-recorder/recorder-bundle.js'),
+      /Required extension bundle 'src\/form-recorder\/recorder-bundle.js' not found. Please build the extension artifact/
+    );
   });
 });
