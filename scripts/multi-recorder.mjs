@@ -12,20 +12,22 @@ const bugbugDir = path.join(extensionsDir, 'bugbug');
 const roverExtDir = path.join(root, 'app-assets', 'rover');
 const sbaseExtDir = path.join(root, 'app-assets', 'sbase-recorder');
 
-async function downloadBugbug() {
-  if (existsSync(bugbugDir)) {
-    console.log('Bugbug extension already downloaded.');
+const cloudqaDir = path.join(extensionsDir, 'cloudqa');
+const fillappDir = path.join(extensionsDir, 'fillapp');
+
+async function downloadExtension(id, url, targetDir) {
+  if (existsSync(targetDir)) {
+    console.log(`${id} extension already downloaded.`);
     return;
   }
-  console.log('Downloading Bugbug extension...');
+  console.log(`Downloading ${id} extension...`);
   await mkdir(extensionsDir, { recursive: true });
-  const crxUrl = 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc';
   
   const controller = new AbortController();
   const downloadTimeout = setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch(crxUrl, { signal: controller.signal });
-    if (!response.ok) throw new Error(`Failed to download Bugbug: ${response.statusText}`);
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Failed to download ${id}: ${response.statusText}`);
   
     const buffer = await response.arrayBuffer();
     let crxBuffer = Buffer.from(buffer);
@@ -46,18 +48,19 @@ async function downloadBugbug() {
       }
     }
 
-    const zipPath = path.join(extensionsDir, 'bugbug.zip');
+    const zipPath = path.join(extensionsDir, `${id}.zip`);
     await writeFile(zipPath, crxBuffer);
   
-    console.log('Extracting Bugbug extension...');
+    console.log(`Extracting ${id} extension...`);
     const zip = new AdmZip(zipPath);
-    zip.extractAllTo(bugbugDir, true);
-    console.log('Bugbug extension ready.');
+    zip.extractAllTo(targetDir, true);
+    console.log(`${id} extension ready.`);
+  } catch (err) {
+    console.warn(`[WARNING] Failed to download or extract ${id} extension: ${err.message}. Skipping...`);
   } finally {
     clearTimeout(downloadTimeout);
   }
 }
-
 
 async function startPlaywright() {
   console.log('Launching browser with all extensions...');
@@ -75,7 +78,9 @@ async function attemptMain() {
   console.log('Building Rover Preview Helper extension...');
   execSync('pnpm build', { stdio: 'inherit', cwd: root });
   
-  await downloadBugbug();
+  await downloadExtension('bugbug', 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc', bugbugDir);
+  await downloadExtension('cloudqa', 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Djndmknkiojkfghnndgndgmjmhkahiggo%26uc', cloudqaDir);
+  await downloadExtension('fillapp', 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Dmdoaagdccddnbjncalegjfemhnlijgbo%26uc', fillappDir);
   
   await startPlaywright();
 }
