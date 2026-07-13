@@ -2,6 +2,9 @@ import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractFromPDF, extractFromMultiplePDFs } from './pdf-pipeline.js';
 
+process.env.LLAMAPARSE_API_KEY = 'test_llama_key';
+process.env.MINDEE_API_KEY = 'test_mindee_key';
+
 describe('pdf-pipeline', () => {
   const originalFetch = globalThis.fetch;
 

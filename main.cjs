@@ -12,29 +12,7 @@ const bugbugDir = path.join(extDataDir, 'bugbug');
 const fillappDir = path.join(extDataDir, 'fillapp');
 const cloudqaDir = path.join(extDataDir, 'cloudqa');
 
-const EXTENSION_SOURCES = [
-  {
-    name: 'Bugbug',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc',
-    destZip: () => path.join(extDataDir, 'bugbug.crx'),
-    extractDir: bugbugDir,
-    isCrx: true,
-  },
-  {
-    name: 'CloudQA',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Djndmknkiojkfghnndgndgmjmhkahiggo%26uc',
-    destZip: () => path.join(extDataDir, 'cloudqa.crx'),
-    extractDir: cloudqaDir,
-    isCrx: true,
-  },
-  {
-    name: 'FillApp',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Dfillapp_placeholder_id%26uc',
-    destZip: () => path.join(extDataDir, 'fillapp.crx'),
-    extractDir: fillappDir,
-    isCrx: true,
-  }
-];
+const { resolveLaunchPlan, acquireExtension } = require('./src/launch-plan.cjs');
 
 /**
  * Pre-seed Chrome Preferences into the user-data-dir so that the browser
@@ -83,46 +61,7 @@ const sbaseExtDir = path.join(activeAssetsDir, 'sbase-recorder');
 
 let mainWindow;
 
-async function downloadExtensionUpdate(url, destZip, extractDir, isCrx = false) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`Failed to download from ${url}`);
-    const buffer = await response.arrayBuffer();
-    let zipBuffer = Buffer.from(buffer);
 
-    if (isCrx) {
-      const magic = zipBuffer.readUInt32LE(0);
-      if (magic === 0x34327243) { // 'Cr24'
-        const version = zipBuffer.readUInt32LE(4);
-        if (version === 2) {
-          const publicKeyLength = zipBuffer.readUInt32LE(8);
-          const signatureLength = zipBuffer.readUInt32LE(12);
-          zipBuffer = zipBuffer.subarray(16 + publicKeyLength + signatureLength);
-        } else if (version === 3) {
-          const headerSize = zipBuffer.readUInt32LE(8);
-          zipBuffer = zipBuffer.subarray(12 + headerSize);
-        }
-      }
-    }
-
-    fs.mkdirSync(path.dirname(destZip), { recursive: true });
-    const tempDestZip = `${destZip}.tmp.${Date.now()}`;
-    fs.writeFileSync(tempDestZip, zipBuffer);
-    fs.renameSync(tempDestZip, destZip);
-
-    const zip = new AdmZip(destZip);
-    await new Promise((resolve, reject) => {
-      zip.extractAllToAsync(extractDir, true, (error) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 let launchInProgress = false;
 
@@ -132,36 +71,56 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
   try {
     fs.mkdirSync(extDataDir, { recursive: true });
 
-    // Determine which extensions to update and load based on mode
-    let targetSources = [];
-    if (mode === 'bugbug' || mode === 'all') targetSources = [EXTENSION_SOURCES.find(e => e.name === 'Bugbug')];
-    // 'rover', 'seleniumbase', and 'playwright-trace' don't need external downloads
+    const env = {
+      extDataDir, bugbugDir, sbaseExtDir, fillappDir, cloudqaDir, roverExtDir,
+      devDist: path.join(__dirname, 'dist'),
+      existsSync: fs.existsSync,
+      pathJoin: path.join
+    };
+    
+    const plan = resolveLaunchPlan(mode, env);
+    if (plan.error) {
+      launchInProgress = false;
+      return `Error: ${plan.error}`;
+    }
 
-    for (const ext of targetSources) {
+    const sys = {
+      fetch: fetch.bind(global),
+      mkdirSync: fs.mkdirSync,
+      writeFileSync: fs.writeFileSync,
+      renameSync: fs.renameSync,
+      existsSync: fs.existsSync,
+      pathDirname: path.dirname,
+      AdmZip: AdmZip,
+      Buffer: Buffer
+    };
+
+    for (const source of plan.targetSources) {
       try {
-        await downloadExtensionUpdate(ext.url, ext.destZip(), ext.extractDir, ext.isCrx);
+        await acquireExtension(source, sys);
       } catch (e) {
-        console.error(`${ext.name} update failed:`, e);
+        if (mode === 'all') {
+          console.warn(`[WARN] ${source.name} update failed:`, e.message);
+        } else {
+          // If we fail to acquire and it doesn't already exist, fail loud
+          if (!fs.existsSync(source.extractDir)) {
+             launchInProgress = false;
+             return `Error: Failed to acquire ${source.name}: ${e.message}`;
+          }
+        }
       }
     }
 
-    let extensions = [];
-    if (mode === 'all') {
-      extensions.push(roverExtDir);
-      if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
-      if (fs.existsSync(sbaseExtDir)) extensions.push(sbaseExtDir);
-      if (fs.existsSync(fillappDir)) extensions.push(fillappDir);
-      if (fs.existsSync(cloudqaDir)) extensions.push(cloudqaDir);
-    } else if (mode === 'rover') {
-      extensions = [roverExtDir];
-    } else if (mode === 'form-recorder') {
-      extensions = [__dirname];
-    } else if (mode === 'bugbug') {
-      if (fs.existsSync(bugbugDir)) extensions.push(bugbugDir);
-    } else if (mode === 'seleniumbase') {
-      if (fs.existsSync(sbaseExtDir)) extensions.push(sbaseExtDir);
+    const finalExtensions = [];
+    for (const ext of plan.extensions) {
+      if (fs.existsSync(ext.dir)) {
+        finalExtensions.push(ext.dir);
+      } else if (mode !== 'all') {
+        launchInProgress = false;
+        return `Error: Extension '${ext.id}' is unavailable. Please ensure it is built/downloaded.`;
+      }
     }
-    const extensionsStr = extensions.join(',');
+    const extensionsStr = finalExtensions.join(',');
 
     const userDataDir = path.join(app.getPath('userData'), 'browser-data');
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
@@ -513,6 +472,10 @@ ipcMain.handle('read-record', async (event, filePath) => {
 
 ipcMain.handle('extract-pdf', async (event, base64, filename) => {
   try {
+    if (!process.env.LLAMAPARSE_API_KEY && !process.env.MINDEE_API_KEY) {
+      return { ok: false, error: 'No PDF extraction API keys configured. Please provide LLAMAPARSE_API_KEY or MINDEE_API_KEY.' };
+    }
+
     // Dynamically import the ES modules
     const { extractFromPDF } = await import('file://' + path.resolve(__dirname, 'src/form-recorder/pdf-pipeline.js'));
     const { convertToSkill } = await import('file://' + path.resolve(__dirname, 'src/form-recorder/skill-converter.js'));

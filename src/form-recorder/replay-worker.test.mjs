@@ -18,6 +18,9 @@ describe('replay-worker', () => {
     messages = [];
     scriptExecutions = [];
 
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => ({ ok: true });
+    globalThis.__originalFetch = originalFetch;
 
     globalThis.chrome = {
       storage: {
@@ -116,8 +119,11 @@ describe('replay-worker', () => {
   afterEach(() => {
     delete globalThis.chrome;
     delete globalThis.window;
-
     clearTestOverrides();
+    if (globalThis.__originalFetch) {
+      globalThis.fetch = globalThis.__originalFetch;
+      delete globalThis.__originalFetch;
+    }
   });
 
   test('saveFormMap, getFormMap, listFormMaps', async () => {
