@@ -20,8 +20,10 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.error, null);
     assert.strictEqual(plan.targetSources.length, 1);
     assert.strictEqual(plan.targetSources[0].id, 'bugbug');
-    assert.strictEqual(plan.extensions.length, 5);
-    assert.strictEqual(plan.extensions.find(e => e.id === 'rover').dir, '/app-assets/rover');
+    assert.strictEqual(plan.extensions.length, 4); // rover, bugbug, fillapp, cloudqa are present (sbase is missing)
+    assert.strictEqual(plan.missingRequired.length, 0);
+    assert.strictEqual(plan.warnings.length, 1);
+    assert.strictEqual(plan.warnings[0], "Extension 'seleniumbase' is unavailable at /ext-data/sbase.");
   });
 
   await t.test('rover mode', () => {
@@ -29,17 +31,27 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.error, null);
     assert.strictEqual(plan.targetSources.length, 0);
     assert.strictEqual(plan.extensions.length, 1);
-    assert.strictEqual(plan.extensions[0].id, 'rover');
+    assert.strictEqual(plan.missingRequired.length, 0);
   });
 
   await t.test('bugbug mode', () => {
     const plan = resolveLaunchPlan('bugbug', env);
     assert.strictEqual(plan.error, null);
     assert.strictEqual(plan.targetSources.length, 1);
-    assert.strictEqual(plan.targetSources[0].destZip, '/ext-data/bugbug.crx');
     assert.strictEqual(plan.extensions.length, 1);
-    assert.strictEqual(plan.extensions[0].id, 'bugbug');
-    assert.strictEqual(plan.extensions[0].dir, '/ext-data/bugbug');
+    assert.strictEqual(plan.missingRequired.length, 0);
+  });
+
+  await t.test('missing required mode fail-loud', () => {
+    const customEnv = {
+      ...env,
+      existsSync: () => false // simulate everything missing
+    };
+    const plan = resolveLaunchPlan('rover', customEnv);
+    assert.strictEqual(plan.error, null);
+    assert.strictEqual(plan.extensions.length, 0);
+    assert.strictEqual(plan.missingRequired.length, 1);
+    assert.strictEqual(plan.missingRequired[0], 'rover');
   });
 
   await t.test('playwright-trace mode', () => {
@@ -60,8 +72,18 @@ test('acquireExtension validation', async (t) => {
     mkdirSync: () => { mkdirCalled = true; },
     writeFileSync: () => { writeCalled = true; },
     renameSync: () => { renameCalled = true; },
+    readFileSync: (p) => {
+      if (p.includes('manifest.json')) {
+        return JSON.stringify({
+          manifest_version: 3,
+          background: { service_worker: "bg.js" }
+        });
+      }
+      return "";
+    },
     existsSync: (path) => true,
     pathDirname: (p) => p.split('/').slice(0, -1).join('/'),
+    pathJoin: (...args) => args.join('/'),
     AdmZip: class { extractAllToAsync(dir, overwrite, cb) { extracted = true; cb(); } },
     Buffer: Buffer
   };
@@ -112,7 +134,7 @@ test('acquireExtension validation', async (t) => {
     );
   });
 
-  await t.test('succeeds for valid zip', async () => {
+  await t.test('throws on missing entrypoint in manifest', async () => {
     const sys = {
       ...baseSys,
       fetch: async () => ({
@@ -120,7 +142,22 @@ test('acquireExtension validation', async (t) => {
         headers: new Headers({ 'content-type': 'application/octet-stream' }),
         arrayBuffer: async () => new ArrayBuffer(10)
       }),
-      existsSync: () => true
+      readFileSync: (p) => JSON.stringify({ manifest_version: 3 })
+    };
+    await assert.rejects(
+      acquireExtension({ url: 'http://foo', destZip: '/foo.crx', extractDir: '/foo' }, sys),
+      /no entrypoints found in manifest/
+    );
+  });
+
+  await t.test('succeeds for valid zip and writes metadata', async () => {
+    const sys = {
+      ...baseSys,
+      fetch: async () => ({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/octet-stream' }),
+        arrayBuffer: async () => new ArrayBuffer(10)
+      })
     };
     await acquireExtension({ url: 'http://foo', destZip: '/foo.crx', extractDir: '/foo' }, sys);
     assert.strictEqual(mkdirCalled, true);

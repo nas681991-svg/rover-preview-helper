@@ -88,12 +88,25 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       fetch: fetch.bind(global),
       mkdirSync: fs.mkdirSync,
       writeFileSync: fs.writeFileSync,
+      readFileSync: fs.readFileSync,
       renameSync: fs.renameSync,
       existsSync: fs.existsSync,
       pathDirname: path.dirname,
+      pathJoin: path.join,
       AdmZip: AdmZip,
       Buffer: Buffer
     };
+
+    if (plan.warnings && plan.warnings.length > 0) {
+      for (const warn of plan.warnings) {
+        console.warn(`[WARN] ${warn}`);
+      }
+    }
+
+    if (plan.missingRequired && plan.missingRequired.length > 0) {
+      launchInProgress = false;
+      return `Error: Required extensions missing: ${plan.missingRequired.join(', ')}`;
+    }
 
     for (const source of plan.targetSources) {
       try {
@@ -111,15 +124,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       }
     }
 
-    const finalExtensions = [];
-    for (const ext of plan.extensions) {
-      if (fs.existsSync(ext.dir)) {
-        finalExtensions.push(ext.dir);
-      } else if (mode !== 'all') {
-        launchInProgress = false;
-        return `Error: Extension '${ext.id}' is unavailable. Please ensure it is built/downloaded.`;
-      }
-    }
+    const finalExtensions = plan.extensions.map(ext => ext.dir);
     const extensionsStr = finalExtensions.join(',');
 
     const userDataDir = path.join(app.getPath('userData'), 'browser-data');
@@ -127,7 +132,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     fs.mkdirSync(myRecordsPath, { recursive: true });
 
     // Pre-seed Chrome profile so extensions launch with Developer Mode on.
-    preseedChromePreferences(userDataDir, extensions);
+    preseedChromePreferences(userDataDir, finalExtensions);
 
     let context = null;
     let launchError = null;

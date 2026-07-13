@@ -29,6 +29,10 @@ function resolveLaunchPlan(mode, env) {
   const plan = {
     targetSources: [],
     extensions: [],
+    startUrl: '',
+    warnings: [],
+    missingRequired: [],
+    needsMcp: false,
     error: null
   };
 
@@ -41,28 +45,39 @@ function resolveLaunchPlan(mode, env) {
       extractDir: env.bugbugDir
     });
   }
-  // (Other sources like cloudqa/fillapp are out of scope for auto-download based on current logic, but could be added here later)
 
   // Determine which extensions should be loaded
+  const toLoad = [];
   if (mode === 'all') {
-    plan.extensions.push({ id: 'rover', dir: env.roverExtDir });
-    plan.extensions.push({ id: 'bugbug', dir: env.bugbugDir });
-    plan.extensions.push({ id: 'seleniumbase', dir: env.sbaseExtDir });
-    plan.extensions.push({ id: 'fillapp', dir: env.fillappDir });
-    plan.extensions.push({ id: 'cloudqa', dir: env.cloudqaDir });
+    toLoad.push({ id: 'rover', dir: env.roverExtDir });
+    toLoad.push({ id: 'bugbug', dir: env.bugbugDir });
+    toLoad.push({ id: 'seleniumbase', dir: env.sbaseExtDir });
+    toLoad.push({ id: 'fillapp', dir: env.fillappDir });
+    toLoad.push({ id: 'cloudqa', dir: env.cloudqaDir });
   } else if (mode === 'rover') {
-    plan.extensions = [{ id: 'rover', dir: env.roverExtDir }];
+    toLoad.push({ id: 'rover', dir: env.roverExtDir });
   } else if (mode === 'form-recorder') {
     const dir = env.existsSync(env.devDist) ? env.devDist : env.roverExtDir;
-    plan.extensions = [{ id: 'form-recorder', dir }];
+    toLoad.push({ id: 'form-recorder', dir });
   } else if (mode === 'bugbug') {
-    plan.extensions = [{ id: 'bugbug', dir: env.bugbugDir }];
-  } else if (mode === 'seleniumbase') {
-    plan.extensions = [{ id: 'seleniumbase', dir: env.sbaseExtDir }];
+    toLoad.push({ id: 'bugbug', dir: env.bugbugDir });
   } else if (mode === 'playwright-trace') {
-    plan.extensions = [];
+    // nothing to load
   } else {
     plan.error = `Unknown mode: ${mode}`;
+  }
+
+  // Validate presence and categorize
+  for (const ext of toLoad) {
+    if (env.existsSync(ext.dir)) {
+      plan.extensions.push(ext);
+    } else {
+      if (mode === 'all') {
+        plan.warnings.push(`Extension '${ext.id}' is unavailable at ${ext.dir}.`);
+      } else {
+        plan.missingRequired.push(ext.id);
+      }
+    }
   }
 
   return plan;
@@ -122,8 +137,35 @@ async function acquireExtension(source, sys) {
       });
     });
 
-    if (!sys.existsSync(source.extractDir + '/manifest.json') && !sys.existsSync(source.extractDir + '\\manifest.json')) {
+    const manifestPath = sys.pathJoin ? sys.pathJoin(source.extractDir, 'manifest.json') : source.extractDir + '/manifest.json';
+    if (!sys.existsSync(manifestPath)) {
       throw new Error(`Invalid extension: manifest.json not found in extracted archive`);
+    }
+
+    const manifestContent = sys.readFileSync ? sys.readFileSync(manifestPath, 'utf-8') : sys.readFileSyncFallback(manifestPath);
+    let manifest;
+    try {
+      manifest = JSON.parse(manifestContent);
+    } catch (e) {
+      throw new Error(`Invalid extension: manifest.json is not valid JSON`);
+    }
+
+    const hasBackground = manifest.background?.service_worker || manifest.background?.scripts;
+    const hasContentScripts = manifest.content_scripts && manifest.content_scripts.length > 0;
+    const hasPopup = manifest.action?.default_popup || manifest.browser_action?.default_popup;
+    
+    if (!hasBackground && !hasContentScripts && !hasPopup) {
+      throw new Error(`Invalid extension: no entrypoints found in manifest`);
+    }
+
+    const metaPath = sys.pathJoin ? sys.pathJoin(source.extractDir, '..', `${source.id}_meta.json`) : source.extractDir + '_meta.json';
+    const metadata = {
+      id: source.id,
+      url: source.url,
+      downloadedAt: new Date().toISOString()
+    };
+    if (sys.writeFileSync) {
+      sys.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
     }
 
   } finally {
