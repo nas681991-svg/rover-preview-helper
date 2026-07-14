@@ -425,6 +425,8 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       await page1.goto('https://google.com');
     }
 
+    const extPage = await context.newPage();
+    await extPage.goto('chrome://extensions/');
     await page1.bringToFront();
 
     let mcpProcess = null;
