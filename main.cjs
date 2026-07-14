@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
 const { chromium } = require('playwright-core');
 const fs = require('fs');
@@ -142,6 +142,19 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     const myRecordsPath = path.join(app.getPath('desktop'), 'MyRecords');
     fs.mkdirSync(myRecordsPath, { recursive: true });
 
+    // ── Atomic Pre-Flight Pipeline ─────────────────────────────
+    try {
+      fs.accessSync(myRecordsPath, fs.constants.W_OK);
+      for (const ext of finalExtensions) {
+         if (!fs.existsSync(path.join(ext, 'manifest.json'))) {
+            throw new Error(`Extension at ${ext} lacks a manifest.json`);
+         }
+      }
+    } catch (preFlightErr) {
+       launchInProgress = false;
+       return `Error: Pre-Flight Pipeline failed: ${preFlightErr.message}`;
+    }
+
     // Pre-seed Chrome profile so extensions launch with Developer Mode on.
     preseedChromePreferences(userDataDir, finalExtensions);
 
@@ -202,24 +215,15 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
 
     // ── Full Interaction Telemetry & Advanced Logging ───────────────────
     const ts = Date.now();
-    const networkStream = fs.createWriteStream(path.join(myRecordsPath, `network-log-${ts}.jsonl`), { flags: 'a' });
-    const consoleStream = fs.createWriteStream(path.join(myRecordsPath, `console-log-${ts}.jsonl`), { flags: 'a' });
-    const redirectStream = fs.createWriteStream(path.join(myRecordsPath, `redirects-${ts}.jsonl`), { flags: 'a' });
-    const iframeStream = fs.createWriteStream(path.join(myRecordsPath, `iframe-log-${ts}.jsonl`), { flags: 'a' });
-    const perfVitalsStream = fs.createWriteStream(path.join(myRecordsPath, `perf-vitals-${ts}.jsonl`), { flags: 'a' });
-    const resourceTimingStream = fs.createWriteStream(path.join(myRecordsPath, `resource-timing-${ts}.jsonl`), { flags: 'a' });
-    const domMutationsStream = fs.createWriteStream(path.join(myRecordsPath, `dom-mutations-${ts}.jsonl`), { flags: 'a' });
+    const unifiedStream = fs.createWriteStream(path.join(myRecordsPath, `unified-telemetry-${ts}.jsonl`), { flags: 'a' });
     const sessionReplayStream = fs.createWriteStream(path.join(myRecordsPath, `session-replay-${ts}.json`), { flags: 'a' });
-    const a11yStream = fs.createWriteStream(path.join(myRecordsPath, `a11y-audit-${ts}.jsonl`), { flags: 'a' });
 
     sessionReplayStream.write('['); // Start JSON array for rrweb
 
     await context.exposeBinding('__advancedLogFlush', async (_source, batch) => {
       if (!Array.isArray(batch) || batch.length === 0) return;
       for (const evt of batch) {
-        if (evt.type === 'perf') perfVitalsStream.write(JSON.stringify(evt) + '\n');
-        else if (evt.type === 'resource') resourceTimingStream.write(JSON.stringify(evt) + '\n');
-        else if (evt.type === 'dom_mutation_summary') domMutationsStream.write(JSON.stringify(evt) + '\n');
+        unifiedStream.write(JSON.stringify(evt) + '\n');
       }
     });
 
@@ -231,48 +235,74 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     });
 
     context.on('request', req => {
-      networkStream.write(JSON.stringify({ type: 'request', url: req.url(), method: req.method(), headers: req.headers(), ts: Date.now() }) + '\n');
+      unifiedStream.write(JSON.stringify({ type: 'request', url: req.url(), method: req.method(), headers: req.headers(), ts: Date.now() }) + '\n');
     });
 
     context.on('response', async res => {
       const status = res.status();
       const req = res.request();
-      networkStream.write(JSON.stringify({
+      unifiedStream.write(JSON.stringify({
         type: 'response', url: res.url(), status, timing: req.timing(), ts: Date.now()
       }) + '\n');
       if (status >= 300 && status < 400) {
-        redirectStream.write(JSON.stringify({ type: 'redirect', url: req.url(), status, redirectedTo: res.headers()['location'], ts: Date.now() }) + '\n');
+        unifiedStream.write(JSON.stringify({ type: 'redirect', url: req.url(), status, redirectedTo: res.headers()['location'], ts: Date.now() }) + '\n');
       }
     });
 
     context.on('console', msg => {
-      consoleStream.write(JSON.stringify({ type: 'console', text: msg.text(), typeOf: msg.type(), ts: Date.now() }) + '\n');
+      unifiedStream.write(JSON.stringify({ type: 'console', text: msg.text(), typeOf: msg.type(), ts: Date.now() }) + '\n');
     });
 
     context.on('pageerror', error => {
-      consoleStream.write(JSON.stringify({ type: 'pageerror', message: error.message, stack: error.stack, ts: Date.now() }) + '\n');
+      unifiedStream.write(JSON.stringify({ type: 'pageerror', message: error.message, stack: error.stack, ts: Date.now() }) + '\n');
     });
 
     context.on('frameattached', frame => {
-      iframeStream.write(JSON.stringify({ type: 'frameattached', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
+      unifiedStream.write(JSON.stringify({ type: 'frameattached', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
     });
 
     context.on('framenavigated', frame => {
-      iframeStream.write(JSON.stringify({ type: 'framenavigated', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
+      unifiedStream.write(JSON.stringify({ type: 'framenavigated', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
     });
 
     const closeStreams = () => {
       try {
-        networkStream.end();
-        consoleStream.end();
-        redirectStream.end();
-        iframeStream.end();
-        perfVitalsStream.end();
-        resourceTimingStream.end();
-        domMutationsStream.end();
-        a11yStream.end();
+        unifiedStream.end();
         sessionReplayStream.write('null]');
         sessionReplayStream.end();
+
+        // ── Package Output into .mrec Archive ─────────────────────
+        setTimeout(() => {
+            try {
+              const zip = new AdmZip();
+              const telemetryPath = path.join(myRecordsPath, `unified-telemetry-${ts}.jsonl`);
+              const replayPath = path.join(myRecordsPath, `session-replay-${ts}.json`);
+              const tracePattern = `trace-${ts}`;
+              
+              if (fs.existsSync(telemetryPath)) zip.addLocalFile(telemetryPath);
+              if (fs.existsSync(replayPath)) zip.addLocalFile(replayPath);
+              
+              const files = fs.readdirSync(myRecordsPath);
+              files.filter(f => f.startsWith(tracePattern) && f.endsWith('.zip')).forEach(f => {
+                 zip.addLocalFile(path.join(myRecordsPath, f));
+              });
+
+              const archivePath = path.join(myRecordsPath, `recording-${ts}.mrec`);
+              zip.writeZip(archivePath);
+              console.log(`✅ Session packaged successfully into ${archivePath}`);
+
+              // Cleanup loose files
+              if (fs.existsSync(telemetryPath)) fs.unlinkSync(telemetryPath);
+              if (fs.existsSync(replayPath)) fs.unlinkSync(replayPath);
+              files.filter(f => f.startsWith(tracePattern) && f.endsWith('.zip')).forEach(f => {
+                 fs.unlinkSync(path.join(myRecordsPath, f));
+              });
+
+            } catch (err) {
+              console.error('❌ Failed to package .mrec archive:', err);
+            }
+        }, 3000); // Wait for streams to fully flush
+
       } catch (_) { }
     };
     context.on('close', closeStreams);
@@ -399,7 +429,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
           await page.addScriptTag({ path: path.join(__dirname, 'node_modules', 'axe-core', 'axe.js') });
           const results = await page.evaluate(() => window.axe ? window.axe.run() : null);
           if (results && results.violations && results.violations.length > 0) {
-            a11yStream.write(JSON.stringify({ type: 'a11y-audit', url: page.url(), violations: results.violations.map(v => ({ id: v.id, impact: v.impact, description: v.description, nodes: v.nodes.length })), ts: Date.now() }) + '\n');
+            unifiedStream.write(JSON.stringify({ type: 'a11y-audit', url: page.url(), violations: results.violations.map(v => ({ id: v.id, impact: v.impact, description: v.description, nodes: v.nodes.length })), ts: Date.now() }) + '\n');
           }
         } catch (e) { }
       });
@@ -416,6 +446,20 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     context.on('close', () => void stopTracing());
 
     const page1 = context.pages()[0] || await context.newPage();
+
+    // ── Bidirectional CDP Integration ─────────────────────────────
+    try {
+      const cdpSession = await context.newCDPSession(page1);
+      await cdpSession.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+      cdpSession.on('Target.attachedToTarget', async (event) => {
+         const { sessionId, targetInfo } = event;
+         if (targetInfo.url.startsWith('chrome-extension://')) {
+            console.log(`[CDP] Attached to extension: ${targetInfo.url}`);
+         }
+      });
+    } catch (e) {
+      console.warn('[CDP] Failed to establish bidirectional channel:', e);
+    }
 
     if (mode === 'bugbug') {
       await page1.goto('https://app.bugbug.io/sign-in/');
@@ -554,6 +598,24 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // ── Integrated Visual Capture Daemon ─────────────────────────────
+  setInterval(async () => {
+    const reqFile = path.join(__dirname, 'request_screenshot.txt');
+    if (fs.existsSync(reqFile)) {
+      try {
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1920, height: 1080 } });
+        if (sources.length > 0) {
+          const imgBuffer = sources[0].thumbnail.toPNG();
+          fs.writeFileSync(path.join(__dirname, 'desktop.png'), imgBuffer);
+          console.log('✅ Screenshot saved to desktop.png (Node.js integrated)');
+        }
+      } catch (e) {
+        console.error('❌ Failed to capture screen:', e);
+      }
+      try { fs.unlinkSync(reqFile); } catch (_) { }
+    }
+  }, 500);
 });
 
 app.on('window-all-closed', function () {
