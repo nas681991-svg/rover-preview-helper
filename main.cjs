@@ -10,7 +10,6 @@ const isWin = process.platform === 'win32';
 const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
 const bugbugDir = path.join(extDataDir, 'bugbug');
 const cloudqaDir = path.join(extDataDir, 'cloudqa');
-const fillappDir = path.join(extDataDir, 'fillapp');
 
 const { resolveLaunchPlan, acquireExtension } = require('./src/launch-plan.cjs');
 
@@ -72,7 +71,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     fs.mkdirSync(extDataDir, { recursive: true });
 
     const env = {
-      extDataDir, bugbugDir, sbaseExtDir, cloudqaDir, fillappDir, roverExtDir,
+      extDataDir, bugbugDir, sbaseExtDir, cloudqaDir, roverExtDir,
       devDist: path.join(__dirname, 'dist'),
       existsSync: fs.existsSync,
       pathJoin: path.join

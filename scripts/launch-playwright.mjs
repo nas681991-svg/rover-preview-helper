@@ -10,7 +10,6 @@ const bugbugDir = path.join(root, 'extensions', 'bugbug');
 const roverExtDir = path.join(root, 'app-assets', 'rover');
 const sbaseExtDir = path.join(root, 'app-assets', 'sbase-recorder');
 const cloudqaDir = path.join(root, 'extensions', 'cloudqa');
-const fillappDir = path.join(root, 'extensions', 'fillapp');
 let userDataDir = path.join(root, '.playwright-userDataDir');
 
 function preseedChromePreferences(dir) {
@@ -58,7 +57,7 @@ async function attemptLaunch() {
   console.log('Playwright: Launching browser with extensions...');
   
   const extensions = [];
-  for (const ext of [bugbugDir, roverExtDir, cloudqaDir, fillappDir, sbaseExtDir]) {
+  for (const ext of [bugbugDir, roverExtDir, cloudqaDir, sbaseExtDir]) {
     if (existsSync(ext)) extensions.push(ext);
   }
   
