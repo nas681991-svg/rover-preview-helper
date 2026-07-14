@@ -157,7 +157,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
           acceptDownloads: true,
           downloadsPath: myRecordsPath,
           args: [
-            ...(extensionsStr ? [`--disable-extensions-except=${extensionsStr}`, `--load-extension=${extensionsStr}`] : []),
+            ...(extensionsStr ? [`--load-extension=${extensionsStr}`] : []),
             '--disable-blink-features=AutomationControlled',
             '--enable-extensions',
             '--no-first-run',

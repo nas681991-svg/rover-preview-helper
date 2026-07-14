@@ -68,7 +68,6 @@ async function attemptLaunch() {
     headless: false,
     ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'],
     args: [
-      `--disable-extensions-except=${extensionsStr}`,
       `--load-extension=${extensionsStr}`,
       '--disable-blink-features=AutomationControlled',
       '--enable-extensions',

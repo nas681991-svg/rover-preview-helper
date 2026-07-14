@@ -64,10 +64,5 @@
     "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
     "patchright": "^1.61.1"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "*"
-    ]
   }
 }
