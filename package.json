@@ -1,6 +1,6 @@
 {
   "name": "rover-preview-helper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Open-source Rover preview helper Chrome extension",
   "author": "Josh Farberman <jfarberman62@gmail.com>",
   "license": "Apache-2.0",
