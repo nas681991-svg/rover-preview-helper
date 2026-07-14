@@ -43,7 +43,6 @@ function resolveLaunchPlan(mode, env) {
     toLoad.push({ id: 'rover', dir: env.roverExtDir });
     toLoad.push({ id: 'bugbug', dir: env.bugbugDir });
     toLoad.push({ id: 'seleniumbase', dir: env.sbaseExtDir });
-
   } else if (mode === 'rover') {
     toLoad.push({ id: 'rover', dir: env.roverExtDir });
   } else if (mode === 'form-recorder') {

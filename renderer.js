@@ -61,6 +61,31 @@ setInterval(() => {
   if (!document.hidden) refreshFiles();
 }, 5000);
 
+const modeSelect = document.getElementById('modeSelect');
+const extensionsList = document.getElementById('extensionsList');
+if (modeSelect && extensionsList) {
+  function updateExtensionsList() {
+    const mode = modeSelect.value;
+    let listHTML = '';
+    if (mode === 'all') {
+      listHTML = '• Rover Preview Helper<br>• BugBug Automation Testing<br>• SeleniumBase Recorder';
+    } else if (mode === 'rover' || mode === 'form-recorder') {
+      listHTML = '• Rover Preview Helper';
+    } else if (mode === 'bugbug') {
+      listHTML = '• BugBug Automation Testing';
+    } else if (mode === 'seleniumbase') {
+      listHTML = '• SeleniumBase Recorder';
+    } else if (mode === 'form-recorder') {
+      listHTML = '• Form Recorder';
+    } else {
+      listHTML = '<i>No extensions loaded</i>';
+    }
+    extensionsList.innerHTML = listHTML;
+  }
+  modeSelect.addEventListener('change', updateExtensionsList);
+  updateExtensionsList();
+}
+
 const pdfUploadInput = document.getElementById('pdfUploadInput');
 if (pdfUploadInput) {
   pdfUploadInput.addEventListener('change', async (e) => {

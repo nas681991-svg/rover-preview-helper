@@ -73,7 +73,7 @@ async function attemptLaunch() {
   preseedChromePreferences(userDataDir);
 
   const context = await chromium.launchPersistentContext(userDataDir, {
-    channel: 'chrome',
+    channel: undefined,
     headless: false,
     ignoreDefaultArgs: ['--disable-extensions'],
     args: [
