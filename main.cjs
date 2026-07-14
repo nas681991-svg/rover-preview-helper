@@ -1,17 +1,12 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
-const { chromium } = require('patchright');
 const fs = require('fs');
-const AdmZip = require('adm-zip');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const isWin = process.platform === 'win32';
 
 const extDataDir = path.join(app.getPath('userData'), 'live-extensions');
 const bugbugDir = path.join(extDataDir, 'bugbug');
-
-
-const { resolveLaunchPlan, acquireExtension } = require('./src/launch-plan.cjs');
 
 /**
  * Pre-seed Chrome Preferences into the user-data-dir so that the browser
@@ -49,6 +44,17 @@ function preseedChromePreferences(userDataDir, extensionPaths = []) {
   if (!prefs.background_mode) prefs.background_mode = {};
   prefs.background_mode.enabled = false;
 
+  // Pin extensions to the toolbar
+  if (!prefs.extensions.pinned_extensions) {
+    prefs.extensions.pinned_extensions = [];
+  }
+  for (const extPath of extensionPaths) {
+    const extId = computeExtensionId(extPath).substring(0, 32);
+    if (!prefs.extensions.pinned_extensions.includes(extId)) {
+      prefs.extensions.pinned_extensions.push(extId);
+    }
+  }
+
   fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
 }
 
@@ -68,6 +74,10 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
   if (launchInProgress) return 'Error: Recording session already in progress.';
   launchInProgress = true;
   try {
+    const { chromium } = require('patchright');
+    const AdmZip = require('adm-zip');
+    const { resolveLaunchPlan, acquireExtension } = require('./src/launch-plan.cjs');
+
     fs.mkdirSync(extDataDir, { recursive: true });
 
     const env = {
@@ -594,12 +604,16 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 700,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true
     }
+  });
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
   });
   mainWindow.loadFile('index.html');
 }

@@ -216,6 +216,9 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **Windows Native Chrome silently dropping unpacked extensions (`--load-extension` fails)**
   When automating Chrome on Windows via Playwright or Puppeteer, native Chrome installations often silently reject unpacked extensions due to `AutomationControlled` flags. To fix this, do not bind to the native Chrome `channel: 'chrome'`. Instead, use Playwright's bundled Chromium which bypasses this restriction. See the multi-recorder documentation in `README.md`.
 
+- **Extensions not visible during automated testing**
+  Our testing harness now supports dynamic extension management and automatically pins extensions to the toolbar by default. If you are building your own harness or launch scripts, ensure you update the `pinned_extensions` preference in the Chrome user data directory to keep your extension visible.
+
 - **You need to test many unrelated sites**  
   Use the reusable wildcard config from Live Test. For production-like behavior, use an exact site config from Workspace.
 

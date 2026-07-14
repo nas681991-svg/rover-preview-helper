@@ -322,6 +322,8 @@ node scripts/multi-recorder.mjs
 
 > **Note on Windows Security:** The multi-recorder and integration tests force Playwright to use its own bundled, hermetic Chromium build instead of your native Windows Chrome installation. This bypasses silent `AutomationControlled` extension rejections.
 
+**Dynamic Extension Management & Pinning:** The local testing environment now features dynamic extension management with configurable launch plans and automated CRX installation scripts. Any extensions loaded during testing are automatically pinned to the Chrome toolbar for improved visibility and easier interaction.
+
 ## Unified Automation Script Language (UASL)
 
 This project exports recordings into the **Rover Automation Script (`.ras.json`)** format. This is an advanced, transpilable format that combines standard programmatic execution with Rover's Shadow DOM piercing and Vision API fallbacks.
