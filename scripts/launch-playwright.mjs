@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const bugbugDir = path.join(root, 'extensions', 'bugbug');
 const roverExtDir = path.join(root, 'app-assets', 'rover');
 const sbaseExtDir = path.join(root, 'app-assets', 'sbase-recorder');
-const cloudqaDir = path.join(root, 'extensions', 'cloudqa');
+
 let userDataDir = path.join(root, '.playwright-userDataDir');
 
 function preseedChromePreferences(dir) {
@@ -57,7 +57,7 @@ async function attemptLaunch() {
   console.log('Playwright: Launching browser with extensions...');
   
   const extensions = [];
-  for (const ext of [bugbugDir, roverExtDir, cloudqaDir, sbaseExtDir]) {
+  for (const ext of [bugbugDir, roverExtDir, sbaseExtDir]) {
     if (existsSync(ext)) extensions.push(ext);
   }
   
@@ -65,6 +65,7 @@ async function attemptLaunch() {
   preseedChromePreferences(userDataDir);
 
   const context = await chromium.launchPersistentContext(userDataDir, {
+    channel: 'chrome',
     headless: false,
     ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'],
     args: [
@@ -79,8 +80,9 @@ async function attemptLaunch() {
     ]
   });
   
-  const page = context.pages()[0] || await context.newPage();
+  const page = await context.newPage();
   await page.goto('chrome://extensions/');
+  await page.bringToFront();
   
   console.log('Playwright: Browser launched. Verifying loaded extensions via CDP...');
   

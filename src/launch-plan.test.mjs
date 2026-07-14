@@ -7,7 +7,6 @@ test('resolveLaunchPlan', async (t) => {
     extDataDir: '/ext-data',
     bugbugDir: '/ext-data/bugbug',
     sbaseExtDir: '/ext-data/sbase',
-    cloudqaDir: '/ext-data/cloudqa',
     roverExtDir: '/app-assets/rover',
     devDist: '/dist',
     existsSync: (path) => path !== '/ext-data/sbase', // let's pretend sbase is missing
@@ -18,9 +17,9 @@ test('resolveLaunchPlan', async (t) => {
     const plan = resolveLaunchPlan('all', env);
     assert.strictEqual(plan.error, null);
     const sourceIds = plan.targetSources.map(s => s.id).sort();
-    assert.deepStrictEqual(sourceIds, ['bugbug', 'cloudqa']);
+    assert.deepStrictEqual(sourceIds, ['bugbug']);
     const extIds = plan.extensions.map(e => e.id).sort();
-    assert.deepStrictEqual(extIds, ['bugbug', 'cloudqa', 'rover']);
+    assert.deepStrictEqual(extIds, ['bugbug', 'rover']);
     assert.strictEqual(plan.missingRequired.length, 0);
     assert.strictEqual(plan.warnings.length, 1);
     assert.ok(plan.warnings[0].includes('seleniumbase'));
@@ -34,11 +33,11 @@ test('resolveLaunchPlan', async (t) => {
     const plan = resolveLaunchPlan('all', customEnv);
     assert.strictEqual(plan.error, null);
     const sourceIds = plan.targetSources.map(s => s.id).sort();
-    assert.deepStrictEqual(sourceIds, ['bugbug', 'cloudqa']);
+    assert.deepStrictEqual(sourceIds, ['bugbug']);
     const extIds = plan.extensions.map(e => e.id).sort();
-    assert.deepStrictEqual(extIds, ['bugbug', 'cloudqa', 'rover']);
+    assert.deepStrictEqual(extIds, ['bugbug', 'rover']);
     assert.strictEqual(plan.missingRequired.length, 0);
-    assert.strictEqual(plan.warnings.length, 1); // Warning for seleniumbase, none for bugbug/cloudqa/fillapp
+    assert.strictEqual(plan.warnings.length, 1); // Warning for seleniumbase, none for bugbug/rover
     assert.ok(plan.warnings[0].includes('seleniumbase'));
   });
 
@@ -50,9 +49,9 @@ test('resolveLaunchPlan', async (t) => {
     const plan = resolveLaunchPlan('all', customEnv);
     assert.strictEqual(plan.error, null);
     const sourceIds = plan.targetSources.map(s => s.id).sort();
-    assert.deepStrictEqual(sourceIds, ['bugbug', 'cloudqa']);
+    assert.deepStrictEqual(sourceIds, ['bugbug']);
     const extIds = plan.extensions.map(e => e.id).sort();
-    assert.deepStrictEqual(extIds, ['bugbug', 'cloudqa', 'rover', 'seleniumbase']);
+    assert.deepStrictEqual(extIds, ['bugbug', 'rover', 'seleniumbase']);
     assert.strictEqual(plan.missingRequired.length, 0);
     assert.strictEqual(plan.warnings.length, 0);
   });
@@ -62,27 +61,6 @@ test('resolveLaunchPlan', async (t) => {
     assert.strictEqual(plan.error, null);
     assert.strictEqual(plan.targetSources.length, 0);
     assert.strictEqual(plan.extensions.length, 1);
-    assert.strictEqual(plan.missingRequired.length, 0);
-  });
-
-  await t.test('cloudqa mode', () => {
-    const plan = resolveLaunchPlan('cloudqa', env);
-    assert.strictEqual(plan.error, null);
-    assert.strictEqual(plan.targetSources.length, 1);
-    assert.strictEqual(plan.extensions.length, 1);
-    assert.strictEqual(plan.extensions[0].id, 'cloudqa');
-    assert.strictEqual(plan.missingRequired.length, 0);
-  });
-
-  await t.test('cloudqa mode downloadable-when-absent', () => {
-    const customEnv = {
-      ...env,
-      existsSync: (path) => path !== '/ext-data/cloudqa' && path !== '/ext-data/sbase' // cloudqa missing
-    };
-    const plan = resolveLaunchPlan('cloudqa', customEnv);
-    assert.strictEqual(plan.error, null);
-    assert.ok(plan.targetSources.some(s => s.id === 'cloudqa'));
-    assert.ok(plan.extensions.some(e => e.id === 'cloudqa'));
     assert.strictEqual(plan.missingRequired.length, 0);
   });
 

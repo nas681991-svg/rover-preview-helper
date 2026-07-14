@@ -12,7 +12,6 @@ const bugbugDir = path.join(extensionsDir, 'bugbug');
 const roverExtDir = path.join(root, 'app-assets', 'rover');
 const sbaseExtDir = path.join(root, 'app-assets', 'sbase-recorder');
 
-const cloudqaDir = path.join(extensionsDir, 'cloudqa');
 
 async function downloadExtension(id, url, targetDir) {
   if (existsSync(targetDir)) {
@@ -78,7 +77,7 @@ async function attemptMain() {
   execSync('pnpm build', { stdio: 'inherit', cwd: root });
   
   await downloadExtension('bugbug', 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc', bugbugDir);
-  await downloadExtension('cloudqa', 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Djndmknkiojkfghnndgndgmjmhkahiggo%26uc', cloudqaDir);
+
   
   await startPlaywright();
 }

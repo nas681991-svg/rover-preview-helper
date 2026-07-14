@@ -5,18 +5,13 @@ const EXTENSION_SOURCES = [
     url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Doiedehaafceacbnnmindilfblafincjb%26uc',
     isCrx: true,
   },
-  {
-    id: 'cloudqa',
-    name: 'CloudQA',
-    url: 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=99.0&acceptformat=crx2,crx3&x=id%3Djndmknkiojkfghnndgndgmjmhkahiggo%26uc',
-    isCrx: true,
-  }
+
 ];
 
 /**
  * Resolves the launch plan for the given mode.
  * @param {string} mode - The launch mode (e.g. 'all', 'rover', 'bugbug', 'form-recorder', 'seleniumbase', 'cloudqa', 'playwright-trace').
- * @param {object} env - The environment context { extDataDir, bugbugDir, sbaseExtDir, cloudqaDir, roverExtDir, devDist, existsSync, pathJoin }.
+ * @param {object} env - The environment context { extDataDir, bugbugDir, sbaseExtDir, roverExtDir, devDist, existsSync, pathJoin }.
  * @returns {object} plan - { targetSources: Array, extensions: Array, error: string|null }
  */
 function resolveLaunchPlan(mode, env) {
@@ -39,14 +34,7 @@ function resolveLaunchPlan(mode, env) {
       extractDir: env.bugbugDir
     });
   }
-  if (mode === 'cloudqa' || mode === 'all') {
-    const cloudqaSource = EXTENSION_SOURCES.find(e => e.id === 'cloudqa');
-    plan.targetSources.push({
-      ...cloudqaSource,
-      destZip: env.pathJoin(env.extDataDir, 'cloudqa.crx'),
-      extractDir: env.cloudqaDir
-    });
-  }
+
 
 
   // Determine which extensions should be loaded
@@ -55,7 +43,7 @@ function resolveLaunchPlan(mode, env) {
     toLoad.push({ id: 'rover', dir: env.roverExtDir });
     toLoad.push({ id: 'bugbug', dir: env.bugbugDir });
     toLoad.push({ id: 'seleniumbase', dir: env.sbaseExtDir });
-    toLoad.push({ id: 'cloudqa', dir: env.cloudqaDir });
+
   } else if (mode === 'rover') {
     toLoad.push({ id: 'rover', dir: env.roverExtDir });
   } else if (mode === 'form-recorder') {
@@ -65,8 +53,6 @@ function resolveLaunchPlan(mode, env) {
     toLoad.push({ id: 'bugbug', dir: env.bugbugDir });
   } else if (mode === 'seleniumbase') {
     toLoad.push({ id: 'seleniumbase', dir: env.sbaseExtDir });
-  } else if (mode === 'cloudqa') {
-    toLoad.push({ id: 'cloudqa', dir: env.cloudqaDir });
 
   } else if (mode === 'playwright-trace') {
     // nothing to load
