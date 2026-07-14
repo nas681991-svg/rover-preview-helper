@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
 const path = require('path');
-const { chromium } = require('playwright-core');
+const { chromium } = require('patchright');
 const fs = require('fs');
 const AdmZip = require('adm-zip');
 const { spawn } = require('child_process');
@@ -160,17 +160,21 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
 
     let context = null;
     let launchError = null;
-    const channels = ['chrome', 'msedge', undefined];
+    const channels = [undefined, 'chrome', 'msedge'];
 
     for (const channel of channels) {
       try {
         context = await chromium.launchPersistentContext(userDataDir, {
           channel,
           headless: false,
+          ignoreDefaultArgs: ['--disable-extensions'],
           acceptDownloads: true,
           downloadsPath: myRecordsPath,
           args: [
-            ...(extensionsStr ? [`--load-extension=${extensionsStr}`] : []),
+            ...(extensionsStr ? [
+              `--disable-extensions-except=${extensionsStr}`,
+              `--load-extension=${extensionsStr}`
+            ] : []),
             '--disable-blink-features=AutomationControlled',
             '--enable-extensions',
             '--no-first-run',
@@ -471,6 +475,13 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
 
     const extPage = await context.newPage();
     await extPage.goto('chrome://extensions/');
+    await extPage.bringToFront();
+    // Wait for extensions to load and render
+    await extPage.waitForTimeout(3000);
+    // Request a desktop screenshot visually verifying the extensions page
+    fs.writeFileSync(path.join(__dirname, 'request_screenshot.txt'), 'capture');
+    await extPage.waitForTimeout(2000); // Give daemon time to capture
+    // Return to original page
     await page1.bringToFront();
 
     let mcpProcess = null;
@@ -594,10 +605,20 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+    createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+    
+    // Auto launch for testing
+    setTimeout(() => {
+      console.log('AUTO-LAUNCHING RECORDER FOR TESTING...');
+      if (mainWindow) {
+        mainWindow.webContents.executeJavaScript(`document.querySelector('#launchBtn').click()`).catch(console.error);
+      }
+    }, 2000);
 
   // ── Integrated Visual Capture Daemon ─────────────────────────────
   setInterval(async () => {

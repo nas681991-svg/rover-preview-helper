@@ -15,9 +15,17 @@ let userDataDir = path.join(root, '.playwright-userDataDir');
 function preseedChromePreferences(dir) {
   const defaultDir = path.join(dir, 'Default');
   const prefsPath = path.join(defaultDir, 'Preferences');
-  if (existsSync(prefsPath)) return;
-  const prefs = { extensions: { ui: { developer_mode: true } } };
   mkdirSync(defaultDir, { recursive: true });
+  
+  let prefs = {};
+  if (existsSync(prefsPath)) {
+    try { prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf-8')); } catch (_) { prefs = {}; }
+  }
+  
+  if (!prefs.extensions) prefs.extensions = {};
+  if (!prefs.extensions.ui) prefs.extensions.ui = {};
+  prefs.extensions.ui.developer_mode = true;
+  
   writeFileSync(prefsPath, JSON.stringify(prefs, null, 2));
 }
 
@@ -67,8 +75,9 @@ async function attemptLaunch() {
   const context = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chrome',
     headless: false,
-    ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'],
+    ignoreDefaultArgs: ['--disable-extensions'],
     args: [
+      `--disable-extensions-except=${extensionsStr}`,
       `--load-extension=${extensionsStr}`,
       '--disable-blink-features=AutomationControlled',
       '--enable-extensions',
@@ -83,6 +92,15 @@ async function attemptLaunch() {
   const page = await context.newPage();
   await page.goto('chrome://extensions/');
   await page.bringToFront();
+  
+  await page.waitForTimeout(3000);
+  try {
+    await page.screenshot({ path: path.join(root, 'extensions_page.png') });
+    console.log('✅ Captured extensions_page.png directly via Playwright!');
+  } catch (err) {
+    console.log('⚠️ Failed to capture via Playwright, falling back to desktop capture...', err.message);
+    // fallback logic or ignore if desktop is better
+  }
   
   console.log('Playwright: Browser launched. Verifying loaded extensions via CDP...');
   
