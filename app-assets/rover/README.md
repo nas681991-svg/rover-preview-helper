@@ -148,7 +148,7 @@ Website owners should still install Rover with the public `embed.js` snippet.
 This helper uses `embed-core.js` because it injects Rover directly from a Chrome
 extension instead of loading it through a normal page `<script src>` tag.
 
-### Strict sites: page CSP relaxation
+### Strict sites: reactive page CSP relaxation
 
 Loading the runtime is only half the story. Because Rover runs in the page's main
 world, the page's CSP also governs Rover's **network egress** (`fetch`, SSE, and
@@ -156,21 +156,39 @@ WebSocket to `agent.rtrvr.ai`), its mascot media (`media-src`), fonts
 (`font-src`), and the module worker (`worker-src`). On hardened sites (e.g. one
 with `connect-src` allow-listing only its own API) those are blocked.
 
-To make previews work there, the helper strips the page's
-`Content-Security-Policy` response header **only for the tab you inject into**,
-using a session-scoped `declarativeNetRequest` rule
-(`src/csp-bypass.js`). Because a CSP is locked in at page load, the first inject
-into a tab reloads it once so the relaxed policy takes effect; the rule is removed
-when the tab closes and never survives a browser restart.
+The helper relaxes CSP **reactively — only when Rover is actually blocked**, never
+speculatively. It injects Rover directly; a `document_start` content-script sensor
+(`src/content-start.js`) listens for the page's `securitypolicyviolation` events. If
+a violation is attributable to Rover (an rtrvr host, the configured API/runtime host,
+or its worker) and the tab is still inside the saved `allowedDomains` policy, it tells
+the background, which climbs a bounded per-tab/host ladder and reloads once so the
+relaxation applies to a clean load:
 
-This means the previewed tab runs without the site's CSP while you test. That is
-acceptable for a developer testing tool, and is scoped as tightly as the platform
-allows (one tab, session-only).
+The background also ensures this sensor immediately before every real Rover injection.
+That covers target tabs that were already open when an unpacked helper was installed or
+reloaded, because Chrome does not retroactively add manifest content scripts to those
+existing documents.
 
-Remaining limitation: a CSP delivered via an HTML `<meta http-equiv>` tag instead
-of a response header cannot be removed by `declarativeNetRequest`, so the rare
-site that ships its policy that way can still block Rover's egress. The
-[headless approach](./EXTENSION_USERS.md) is the alternative for those cases.
+1. **`declarativeNetRequest`** strips the `Content-Security-Policy` response header
+   for that tab only (`src/csp-bypass.js`).
+2. If the site ships its policy in a `<meta http-equiv="Content-Security-Policy">`
+   tag (which header rules can't remove — Chromium applies a `<meta>` CSP the instant
+   the parser inserts it and never revokes it), the helper escalates to the DevTools
+   protocol: it attaches `chrome.debugger` and calls `Page.setBypassCSP(true)`
+   (`src/csp-bypass-debugger.js`), disabling **all** of the tab's CSP — header and
+   `<meta>` — covering egress, worker, fonts, styles, and media at once.
+
+So a site that doesn't block Rover (most demos) gets **no reload and no debugger
+banner**. Only a genuinely `<meta>`-CSP-blocked site (e.g. `app.merge.dev`) reaches
+step 2. That path needs the `debugger` permission and shows a "Rover Preview Helper
+started debugging this browser" banner while attached; hide it for polished demos by
+launching Chrome with `--silent-debugger-extension-api`.
+
+Everything is scoped to the one injected tab, host, and session: the DNR rule and the
+debugger attach are removed when the tab leaves the configured domain scope or closes,
+tracked in `chrome.storage.session` so same-host strict pages survive a service-worker
+restart, and never outlive a browser restart. The [headless approach](./EXTENSION_USERS.md)
+remains an alternative when you'd rather not attach the debugger.
 
 ## Getting your config
 
@@ -217,18 +235,13 @@ The popup is not asking for the production install snippet. It wants JSON only.
 ## What the helper does
 
 - injects Rover into the active tab from popup JSON config
-- bundles the Rover runtime and relaxes the active tab's CSP so it works on strict sites (reloads the tab once on first inject)
+- bundles the Rover runtime and, only when a strict site actually blocks Rover, relaxes that tab's CSP reactively (declarativeNetRequest header strip, escalating to a `chrome.debugger` `Page.setBypassCSP` bypass for `<meta>`-tag CSP) — clean sites get no reload and no debugger banner
 - auto-hydrates from hosted preview handoff fragments
 - refreshes hosted preview state when reconnecting
 - re-injects on reload and history navigation
-- keeps hosted handoff scoping tied to the intended target host
-- lets generic reusable/exact configs keep re-injecting while later pages stay inside `allowedDomains`
+- follows the config's `allowedDomains` and `domainScopeMode` for hosted handoffs and generic configs
+- keeps re-injecting while later pages stay inside that domain policy
 - rejects tabs whose host is outside the config's `allowedDomains`
-- validates config schema in real-time within the popup
-- orchestrates multiple active preview sessions via a dedicated Dashboard
-- maintains Service Worker crash resilience and ephemeral state cleanup
-- records structured error telemetry (Diagnostics Panel) for easier debugging
-- auto-refreshes preview tokens in the background via `chrome.alarms`
 
 ## What it does not do
 
@@ -291,48 +304,8 @@ Be careful not to:
 - persist preview tokens longer than needed
 - confuse short-lived preview tokens with persistent Workspace site keys
 
-## Testing
-
-The extension includes a comprehensive End-to-End (E2E) integration test suite built with **Patchright** (a fork of Playwright designed to bypass bot-detection and extension restrictions).
-
-To run the unit tests:
-```bash
-pnpm test
-```
-
-To run the E2E integration tests:
-```bash
-pnpm test:integration
-```
-
-The E2E suite covers:
-- Core extension lifecycle and content script injection
-- UI rendering and config validation
-- CDP-based CSP bypass and sandbox escape validation
-- Multi-tab orchestration and diagnostic telemetry
-- Background alarms and token refresh logic
-
-### Multi-Recorder Environment
-
-If you want to record forms using multiple systems concurrently (Bugbug, SeleniumBase, and the native Rover Recorder), you can launch the isolated local environment:
-
-```bash
-node scripts/multi-recorder.mjs
-```
-
-> **Note on Windows Security:** The multi-recorder and integration tests force Playwright to use its own bundled, hermetic Chromium build instead of your native Windows Chrome installation. This bypasses silent `AutomationControlled` extension rejections.
-
-## Unified Automation Script Language (UASL)
-
-This project exports recordings into the **Rover Automation Script (`.ras.json`)** format. This is an advanced, transpilable format that combines standard programmatic execution with Rover's Shadow DOM piercing and Vision API fallbacks.
-
-By clicking **Download RAS Script** in the popup, you receive a full JSON definition representing your form map with the complete Selector Cascade (primary CSS, XPath fallback, text heuristics, coordinates). You can also **Upload RAS Script** to replay it directly.
-
-For full details on this overly-detailed scripting language, read the [UASL Specification](docs/UASL_SPEC.md).
-
 ## Related docs
 
-- UASL Specification: [docs/UASL_SPEC.md](./docs/UASL_SPEC.md)
 - Extension users: [./EXTENSION_USERS.md](./EXTENSION_USERS.md)
 - Headless control: [./HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md)
 - Headless control sample: [./examples/headless-control-extension](./examples/headless-control-extension)

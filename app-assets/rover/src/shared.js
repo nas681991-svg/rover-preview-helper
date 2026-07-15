@@ -1,9 +1,13 @@
 export const STORAGE_KEY_PREFIX = 'rover-preview-helper:tab:';
-export const STATUS_KEY_PREFIX = 'rover-preview-helper:status:';
+export const INJECT_DEBOUNCE_MS = 1500;
+export const INJECT_STORM_WINDOW_MS = 60_000;
+export const INJECT_STORM_THRESHOLD = 5;
+export const SELF_REWRITE_WINDOW_MS = 5000;
 export const PREVIEW_ID_PARAM = 'rover_preview_id';
 export const PREVIEW_TOKEN_PARAM = 'rover_preview_token';
 export const PREVIEW_API_PARAM = 'rover_preview_api';
 export const HELPER_PAYLOAD_FRAGMENT_PARAM = 'rover_helper_payload';
+const DEFAULT_EMBED_SCRIPT_URL = 'https://rover.rtrvr.ai/embed.js';
 const DEFAULT_API_BASE = 'https://agent.rtrvr.ai';
 const VOICE_AUTO_STOP_MIN_MS = 800;
 const VOICE_AUTO_STOP_MAX_MS = 5000;
@@ -24,11 +28,11 @@ export function normalizeHost(urlString) {
 
 export function normalizeAllowedDomains(value) {
   if (Array.isArray(value)) {
-    return Array.from(new Set(value.map(item => String(item || '').trim()).filter(Boolean)));
+    return value.map(item => String(item || '').trim()).filter(Boolean);
   }
   const raw = String(value || '').trim();
   if (!raw) return [];
-  return Array.from(new Set(raw.split(',').map(item => item.trim()).filter(Boolean)));
+  return raw.split(',').map(item => item.trim()).filter(Boolean);
 }
 
 function normalizeVoiceConfig(value) {
@@ -79,26 +83,20 @@ function normalizeUiConfig(value) {
 
 function normalizePageConfig(value) {
   if (!value || typeof value !== 'object') return undefined;
+  const pageConfig = {};
   if (typeof value.disableAutoScroll === 'boolean') {
-    return { disableAutoScroll: value.disableAutoScroll };
+    pageConfig.disableAutoScroll = value.disableAutoScroll;
   }
-  return undefined;
+  if (value.backgroundTabs === 'identity' || value.backgroundTabs === 'digest_unchanged' || value.backgroundTabs === 'full') {
+    pageConfig.backgroundTabs = value.backgroundTabs;
+  }
+  return Object.keys(pageConfig).length ? pageConfig : undefined;
 }
 
 function encodeBase64Url(bytes) {
-  let base64;
-  if (typeof Buffer !== 'undefined') {
-    base64 = Buffer.from(bytes).toString('base64');
-  } else {
-    // Chunked approach to avoid RangeError and GC thrashing on large payloads
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray ? bytes.subarray(i, i + chunkSize) : bytes.slice(i, i + chunkSize);
-      binary += String.fromCharCode.apply(null, chunk);
-    }
-    base64 = btoa(binary);
-  }
+  const base64 = typeof Buffer !== 'undefined'
+    ? Buffer.from(bytes).toString('base64')
+    : btoa(String.fromCharCode(...bytes));
 
   return base64
     .replace(/\+/g, '-')
@@ -145,7 +143,7 @@ export function isHostAllowed(host, allowedDomains, domainScopeMode = 'registrab
   const normalizedHost = String(host || '').trim().toLowerCase();
   if (!normalizedHost) return false;
   const patterns = normalizeAllowedDomains(allowedDomains).map(normalizeDomainPattern).filter(Boolean);
-  if (!patterns.length) return false;
+  if (!patterns.length) return true;
 
   return patterns.some(pattern => {
     if (pattern === '*') return true;
@@ -172,19 +170,12 @@ export function normalizeConfig(input = {}) {
   const sessionId = String(input.sessionId || '').trim();
   const siteKeyId = String(input.siteKeyId || input.keyId || '').trim();
   const sessionTokenExpiresAt = Number(input.sessionTokenExpiresAt);
+  const embedScriptUrl = String(input.embedScriptUrl || DEFAULT_EMBED_SCRIPT_URL).trim() || DEFAULT_EMBED_SCRIPT_URL;
   const launchUrl = String(input.launchUrl || '').trim();
   const requestId = String(input.requestId || '').trim();
   const attachToken = String(input.attachToken || '').trim();
   const targetUrl = String(input.targetUrl || '').trim();
-  let apiBase = String(input.apiBase || DEFAULT_API_BASE).trim() || DEFAULT_API_BASE;
-  try {
-    const parsedApiBase = new URL(apiBase);
-    if (parsedApiBase.protocol !== 'http:' && parsedApiBase.protocol !== 'https:') {
-      apiBase = DEFAULT_API_BASE;
-    }
-  } catch {
-    apiBase = DEFAULT_API_BASE;
-  }
+  const apiBase = String(input.apiBase || DEFAULT_API_BASE).trim() || DEFAULT_API_BASE;
   const workerUrl = String(input.workerUrl || '').trim();
   const domainScopeMode = input.domainScopeMode === 'host_only' ? 'host_only' : 'registrable_domain';
   const allowedDomains = normalizeAllowedDomains(input.allowedDomains);
@@ -208,7 +199,8 @@ export function normalizeConfig(input = {}) {
     sessionToken,
     sessionId,
     siteKeyId,
-    sessionTokenExpiresAt: Number.isFinite(sessionTokenExpiresAt) && sessionTokenExpiresAt > 0 ? sessionTokenExpiresAt : 0,
+    sessionTokenExpiresAt: Number.isFinite(sessionTokenExpiresAt) ? sessionTokenExpiresAt : 0,
+    embedScriptUrl,
     launchUrl,
     requestId,
     attachToken,
@@ -247,9 +239,11 @@ export function extractPreviewLaunchParams(urlString) {
 }
 
 function getHelperFragmentValue(rawHash) {
-  if (!rawHash || !rawHash.includes(HELPER_PAYLOAD_FRAGMENT_PARAM + '=')) return '';
-  const match = rawHash.match(new RegExp(`(?:[?&#]|\\b)${HELPER_PAYLOAD_FRAGMENT_PARAM}=([^&]+)`));
-  return match ? match[1].trim() : '';
+  if (!rawHash || !rawHash.includes('=')) return '';
+  const params = new URLSearchParams(rawHash);
+  return String(
+    params.get(HELPER_PAYLOAD_FRAGMENT_PARAM) || '',
+  ).trim();
 }
 
 export function hasHelperConfigFragment(urlString) {
@@ -270,7 +264,7 @@ export function extractHelperConfigFragment(urlString) {
     if (!encoded) return null;
     const decoded = decodeBase64Url(encoded);
     const parsed = JSON.parse(decoded);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
   } catch (error) {
     const message = String(error?.message || error || 'Invalid helper handoff payload.');
     throw new Error(`Invalid Rover helper handoff: ${message}`);
@@ -284,12 +278,10 @@ export function stripPreviewLaunchParams(urlString) {
     url.searchParams.delete(PREVIEW_TOKEN_PARAM);
     url.searchParams.delete(PREVIEW_API_PARAM);
     const rawHash = String(url.hash || '').replace(/^#/, '').trim();
-    if (rawHash && rawHash.includes(HELPER_PAYLOAD_FRAGMENT_PARAM + '=')) {
-      const regex = new RegExp(`([?&]?)${HELPER_PAYLOAD_FRAGMENT_PARAM}=[^&]*(&?)`);
-      let nextHash = rawHash.replace(regex, (match, prefix, suffix) => {
-        return (prefix && suffix) ? prefix : '';
-      });
-      if (nextHash.startsWith('&')) nextHash = nextHash.slice(1);
+    if (rawHash && rawHash.includes('=')) {
+      const params = new URLSearchParams(rawHash);
+      params.delete(HELPER_PAYLOAD_FRAGMENT_PARAM);
+      const nextHash = params.toString();
       url.hash = nextHash ? nextHash : '';
     }
     return url.toString();
@@ -308,7 +300,36 @@ export function buildLaunchUrl(currentUrl, config) {
 }
 
 export function serializeConfigForSeed(config) {
-  return { ...config };
+  return {
+    previewId: config.previewId,
+    previewToken: config.previewToken,
+    siteId: config.siteId,
+    publicKey: config.publicKey,
+    sessionToken: config.sessionToken,
+    sessionId: config.sessionId,
+    siteKeyId: config.siteKeyId,
+    sessionTokenExpiresAt: config.sessionTokenExpiresAt,
+    embedScriptUrl: config.embedScriptUrl,
+    launchUrl: config.launchUrl,
+    requestId: config.requestId,
+    attachToken: config.attachToken,
+    targetUrl: config.targetUrl,
+    apiBase: config.apiBase,
+    workerUrl: config.workerUrl,
+    allowedDomains: config.allowedDomains,
+    domainScopeMode: config.domainScopeMode,
+    sessionScope: config.sessionScope,
+    openOnInit: config.openOnInit,
+    mode: config.mode,
+    allowActions: config.allowActions,
+    cloudSandboxEnabled: config.cloudSandboxEnabled,
+    pageConfig: config.pageConfig,
+    ui: config.ui,
+    previewLabel: config.previewLabel,
+    targetHost: config.targetHost,
+    bootstrapId: config.bootstrapId,
+    configRefreshedAt: config.configRefreshedAt,
+  };
 }
 
 export function encodeHelperConfigFragment(config) {
@@ -319,85 +340,147 @@ export function encodeHelperConfigFragment(config) {
   return `${HELPER_PAYLOAD_FRAGMENT_PARAM}=${encodeBase64Url(bytes)}`;
 }
 
-/**
- * Validate a raw config object and return an array of issues.
- * Each issue is { level: 'error'|'warning'|'info', message: string }.
- * An empty array means the config is valid.
- *
- * @param {object} cfg - Parsed JSON config object.
- * @returns {Array<{level: string, message: string}>}
- */
-export function validateConfigInput(cfg) {
-  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) {
-    return [{ level: 'error', message: 'Config must be a JSON object.' }];
-  }
-
-  const issues = [];
-
-  // Required: siteId
-  const siteId = String(cfg.siteId || '').trim();
-  if (!siteId) {
-    issues.push({ level: 'error', message: 'Missing required field: siteId' });
-  }
-
-  // Required: publicKey or sessionToken
-  const publicKey = String(cfg.publicKey || '').trim();
-  const sessionToken = String(cfg.sessionToken || '').trim();
-  if (!publicKey && !sessionToken) {
-    issues.push({ level: 'error', message: 'Need either publicKey or sessionToken' });
-  }
-
-  // Format checks (warnings, not errors — user may know what they're doing)
-  if (publicKey && !publicKey.startsWith('pk_')) {
-    issues.push({ level: 'warning', message: 'publicKey usually starts with "pk_"' });
-  }
-  if (sessionToken && !sessionToken.startsWith('rvrsess_') && !sessionToken.startsWith('rt_')) {
-    issues.push({ level: 'warning', message: 'sessionToken format looks unusual' });
-  }
-
-  // Structural checks
-  if (cfg.allowedDomains !== undefined && !Array.isArray(cfg.allowedDomains)) {
-    issues.push({ level: 'warning', message: 'allowedDomains should be an array' });
-  }
-  if (cfg.apiBase) {
-    try {
-      const parsed = new URL(String(cfg.apiBase));
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        issues.push({ level: 'warning', message: 'apiBase protocol should be http or https' });
-      }
-    } catch {
-      issues.push({ level: 'warning', message: 'apiBase is not a valid URL' });
-    }
-  }
-  if (cfg.domainScopeMode && !['host_only', 'registrable_domain'].includes(cfg.domainScopeMode)) {
-    issues.push({ level: 'warning', message: `Unknown domainScopeMode: "${cfg.domainScopeMode}"` });
-  }
-  if (cfg.mode && !['safe', 'full'].includes(cfg.mode)) {
-    issues.push({ level: 'warning', message: `Unknown mode: "${cfg.mode}"` });
-  }
-
-  return issues;
+// A document keeps its booted Rover instance for its whole lifetime: the
+// bootstrap guard bails on a second run, so re-injecting the bundle can never
+// deliver new config — it only re-evaluates ~1.26 MB on the page main thread
+// and replaces window.rover, orphaning the live instance. Skip whenever the
+// probe says the document already bootstrapped, regardless of signature.
+//
+// A bootstrap that ran but BAILED (host-allow check) leaves bootstrapped=false
+// but attempted=true. The hostname can't change within a document, so retrying
+// the same config would bail forever — skip it. A different signature means new
+// config (e.g. corrected allowedDomains from an explicit inject) that may pass
+// the host check, so it gets one fresh attempt.
+export function shouldSkipInjectForProbe(probe, signature) {
+  if (!probe) return false;
+  if (probe.bootstrapped === true) return true;
+  return probe.attempted === true && String(probe.signature || '') === String(signature || '');
 }
 
-/**
- * Resolves the path to an extension bundle dynamically.
- * Supports loading from the built extension (dist/ or app-assets/)
- * or the repository root in dev mode.
- */
-export async function resolveBundle(bundlePath) {
-  const paths = [
-    bundlePath,          // Built artifact context
-    `dist/${bundlePath}` // Dev repo root context
-  ];
+// CSP is only relaxed *reactively* — when the page fires a real
+// `securitypolicyviolation` that is attributable to Rover. content-start.js relays
+// those to the background as this message.
+export const CSP_BLOCKED_MESSAGE = 'ROVER_PREVIEW_HELPER_CSP_BLOCKED';
 
-  for (const p of paths) {
-    try {
-      const res = await fetch(chrome.runtime.getURL(p));
-      if (res.ok) return p;
-    } catch {
-      // Ignore and try the next path
-    }
+// Hosts Rover's runtime talks to / loads assets from. A CSP violation whose
+// blockedURI resolves to one of these is Rover's, not the site's own traffic.
+export const ROVER_HOSTS = [
+  'agent.rtrvr.ai',
+  'extensionrouter.rtrvr.ai',
+  'roverbook.rtrvr.ai',
+  'rover.rtrvr.ai',
+  'www.rtrvr.ai',
+];
+
+// Rover boots a blob: module worker; a CSP block on creating it reports one of these
+// directives with a blob/empty blockedURI (never a real host). Rover's own script is
+// injected via executeScript, which bypasses script-src, so script-src/inline/eval
+// violations are always the site's own and must NOT be attributed to Rover.
+export const ROVER_WORKER_DIRECTIVES = ['worker-src', 'child-src', 'default-src'];
+
+// Decide whether a securitypolicyviolation is caused by Rover (so we should relax the
+// page CSP) rather than by the host site's own blocked traffic. Only enforced (not
+// report-only) violations count.
+export function isRoverCspViolation({ blockedURI, effectiveDirective, disposition } = {}, options = {}) {
+  if (disposition !== 'enforce') return false;
+  const raw = String(blockedURI || '').toLowerCase().trim();
+  const directive = String(effectiveDirective || '').toLowerCase().trim();
+  const isWorkerLike = raw === ''
+    || raw === 'blob'
+    || raw.startsWith('blob:')
+    || raw.startsWith('chrome-extension:');
+  if (isWorkerLike && ROVER_WORKER_DIRECTIVES.includes(directive)) return true;
+
+  const host = normalizeHost(blockedURI);
+  if (host) {
+    const extraHosts = Array.isArray(options.extraHosts) ? options.extraHosts : [];
+    const roverHosts = [...ROVER_HOSTS, ...extraHosts]
+      .map(item => String(item || '').trim().toLowerCase())
+      .filter(Boolean);
+    return roverHosts.some(rover => host === rover || host.endsWith(`.${rover}`));
   }
+  // No real host → a keyword/blob/empty source. Only Rover's blob worker qualifies.
+  return false;
+}
 
-  throw new Error(`Required extension bundle '${bundlePath}' not found. Please build the extension artifact (e.g. via 'pnpm build' or 'pnpm dev') before running.`);
+// Bounded escalation ladder for a blocked tab: strip the CSP response header (DNR),
+// then also attach chrome.debugger + Page.setBypassCSP (covers <meta> CSP), then give
+// up. A <meta> CSP can't be header-stripped, so meta sites jump straight to DNR+CDP.
+export const CSP_LEVEL = {
+  NONE: 'none',
+  DNR: 'dnr',
+  DNR_CDP: 'dnr_cdp',
+  FAILED: 'failed',
+};
+
+export function nextEscalationLevel(current, { hasMetaCsp = false } = {}) {
+  const level = current || CSP_LEVEL.NONE;
+  if (level === CSP_LEVEL.NONE) {
+    return hasMetaCsp
+      ? { level: CSP_LEVEL.DNR_CDP, enableDnr: true, attachCdp: true, failed: false }
+      : { level: CSP_LEVEL.DNR, enableDnr: true, attachCdp: false, failed: false };
+  }
+  if (level === CSP_LEVEL.DNR) {
+    return { level: CSP_LEVEL.DNR_CDP, enableDnr: false, attachCdp: true, failed: false };
+  }
+  // DNR_CDP (or already FAILED) → nothing stronger is available.
+  return { level: CSP_LEVEL.FAILED, enableDnr: false, attachCdp: false, failed: true };
+}
+
+export function shouldDebounceInject(record, signature, nowMs, debounceMs = INJECT_DEBOUNCE_MS) {
+  if (!record || record.signature !== signature) return false;
+  return Number.isFinite(record.lastInjectAt) && nowMs - record.lastInjectAt < debounceMs;
+}
+
+export function recordInjectAttempt(prev, nowMs, windowMs = INJECT_STORM_WINDOW_MS) {
+  if (!prev || !Number.isFinite(prev.windowStartMs) || nowMs - prev.windowStartMs >= windowMs) {
+    return { windowStartMs: nowMs, count: 1 };
+  }
+  return { windowStartMs: prev.windowStartMs, count: (prev.count || 0) + 1 };
+}
+
+export function isInjectStorm(stats, threshold = INJECT_STORM_THRESHOLD) {
+  return Boolean(stats && stats.count > threshold);
+}
+
+// Circuit breaker on top of the storm detector: once a tab trips the storm
+// threshold, stop injecting entirely until the storm window expires. The
+// window is anchored at windowStartMs, so the circuit closes on its own and
+// the next inject starts a fresh window. An explicit popup inject clears the
+// stats and bypasses this.
+export function isInjectCircuitOpen(stats, nowMs, {
+  threshold = INJECT_STORM_THRESHOLD,
+  windowMs = INJECT_STORM_WINDOW_MS,
+} = {}) {
+  if (!isInjectStorm(stats, threshold)) return false;
+  return Number.isFinite(stats.windowStartMs) && nowMs - stats.windowStartMs < windowMs;
+}
+
+// Budget on CSP-escalation reloads per tab. Each escalation rung reloads the
+// tab; a workflow that hops hosts re-climbs the ladder per host, and with the
+// MV3 service worker torn down between hops the in-memory guard is lost — so
+// the budget persists in storage.session. Same fixed-window shape as
+// recordInjectAttempt.
+export const CSP_RELOAD_BUDGET_WINDOW_MS = 5 * 60_000;
+export const CSP_RELOAD_BUDGET_MAX = 6;
+
+export function recordCspReload(prev, nowMs, windowMs = CSP_RELOAD_BUDGET_WINDOW_MS) {
+  if (!prev || !Number.isFinite(prev.windowStartMs) || nowMs - prev.windowStartMs >= windowMs) {
+    return { windowStartMs: nowMs, count: 1 };
+  }
+  return { windowStartMs: prev.windowStartMs, count: (prev.count || 0) + 1 };
+}
+
+export function isCspReloadBudgetExceeded(stats, nowMs, {
+  max = CSP_RELOAD_BUDGET_MAX,
+  windowMs = CSP_RELOAD_BUDGET_WINDOW_MS,
+} = {}) {
+  if (!stats || !Number.isFinite(stats.windowStartMs)) return false;
+  if (nowMs - stats.windowStartMs >= windowMs) return false;
+  return (stats.count || 0) >= max;
+}
+
+export function isRecentSelfRewrite(entry, url, nowMs, windowMs = SELF_REWRITE_WINDOW_MS) {
+  if (!entry || !entry.url || entry.url !== String(url || '')) return false;
+  return Number.isFinite(entry.ts) && nowMs - entry.ts < windowMs;
 }

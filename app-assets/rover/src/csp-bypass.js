@@ -15,22 +15,13 @@
 export const CSP_RULE_ID_BASE = 1_000_000;
 
 export function ruleIdForTab(tabId) {
-  const num = Number(tabId);
-  if (!Number.isInteger(num) || num < 0) throw new Error('Invalid tabId for CSP rule');
-  return CSP_RULE_ID_BASE + num;
+  return CSP_RULE_ID_BASE + Number(tabId);
 }
 
 /**
  * A declarativeNetRequest session rule that removes the CSP response headers for
- * one tab's top-level and framed document loads so Rover's runtime can make
- * network requests (connect-src), load media (media-src), fonts (font-src), and
- * spawn its module worker (worker-src) without being blocked by the page's
- * policy. Pure (no chrome APIs) so it can be unit-tested.
- *
- * Why remove instead of append: the CSP spec intersects multiple directives of
- * the same type, so appending a broader `connect-src` to a narrow one makes the
- * policy *more* restrictive, not less. Removing the header entirely is the only
- * reliable way to unblock Rover on strict sites.
+ * one tab's top-level and framed document loads. Pure (no chrome APIs) so it can
+ * be unit-tested.
  */
 export function buildCspRemovalRule(tabId) {
   return {
@@ -67,8 +58,7 @@ async function hasCspBypassRule(tabId) {
  * that already happened).
  */
 export async function enableCspBypass(tabId) {
-  const num = Number(tabId);
-  if (!Number.isInteger(num) || num < 0) return false;
+  if (!Number.isFinite(Number(tabId))) return false;
   const alreadyEnabled = await hasCspBypassRule(tabId);
   await chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: [ruleIdForTab(tabId)],
@@ -78,25 +68,12 @@ export async function enableCspBypass(tabId) {
 }
 
 export async function disableCspBypass(tabId) {
-  const num = Number(tabId);
-  if (!Number.isInteger(num) || num < 0) return;
+  if (!Number.isFinite(Number(tabId))) return;
   try {
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: [ruleIdForTab(tabId)],
     });
   } catch {
     // Best-effort cleanup; the session rule is dropped on browser restart anyway.
-  }
-}
-
-export async function cleanupOrphanedRules() {
-  try {
-    const rules = await chrome.declarativeNetRequest.getSessionRules();
-    const ids = rules.filter(r => r.id >= CSP_RULE_ID_BASE).map(r => r.id);
-    if (ids.length) {
-      await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
-    }
-  } catch {
-    // Ignore cleanup errors
   }
 }

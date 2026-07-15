@@ -155,15 +155,6 @@ chrome.action.onClicked.addListener(async tab => {
 });
 ```
 
-## MV3 Service Worker Resilience & Token Management
-
-Manifest V3 service workers are transient and will be killed by the browser after periods of inactivity. To ensure your Rover integration remains stable:
-
-1. **State Storage**: Do not rely on global variables (`const state = {}`) in `background.js` to persist session data. Use `chrome.storage.session` (which stays in memory and survives worker restarts) to store active session IDs and tokens.
-2. **Ephemeral Maps**: If you must use global `Map` or `Set` objects for active connections, ensure you have an `onStartup` listener that cleans up stale entries and syncs with `chrome.storage.session`.
-3. **Token Auto-Refresh**: If you are using temporary hosted preview tokens instead of persistent Workspace keys, set up a `chrome.alarms` trigger to wake the service worker and refresh the token before it expires.
-4. **Telemetry**: Implement structured error logging using `chrome.storage.session` to track silent failures in background tasks that might occur when the popup is closed.
-
 ## Use Isolated Content Scripts for Your Own UI
 
 If you are adding your own extension UI or custom automation logic, keep most of it in an isolated content script. Use `world: "MAIN"` only for the small Rover boot bridge above.
@@ -204,6 +195,17 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **CSP blocks `https://rover.rtrvr.ai/embed.js`**  
   Package `embed-core.js` as `vendor/rover-embed.js` and inject the packaged file.
 
+- **A strict site still blocks Rover's egress (`Refused to connect`, `connect-src`)**
+  The page enforces CSP. The helper relaxes it *reactively* — a content-script sensor
+  watches for a `securitypolicyviolation` caused by Rover, then strips the CSP
+  *response header* for the tab with a `declarativeNetRequest` rule
+  (`src/csp-bypass.js`) and, if the policy comes from a `<meta http-equiv>` tag
+  (headers can't reach it), attaches `chrome.debugger` + `Page.setBypassCSP(true)`
+  (`src/csp-bypass-debugger.js`). The debugger path needs the `debugger` permission
+  and shows a debug banner (hide it with `--silent-debugger-extension-api`). Sites
+  that don't block Rover are never reloaded and never show the banner. The bypass is
+  dropped when the tab leaves the configured host/domain scope.
+
 - **Rover says the host is outside `allowedDomains`**  
   Go back to [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace) and add the domain. `linkedin.com` with `registrable_domain` covers `www.linkedin.com` and its subdomains.
 
@@ -213,26 +215,8 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **Worker fails to load**  
   Set `workerUrl: chrome.runtime.getURL("vendor/worker.js")` and include `vendor/worker.js` under `web_accessible_resources`.
 
-- **Windows Native Chrome silently dropping unpacked extensions (`--load-extension` fails)**
-  When automating Chrome on Windows via Playwright or Puppeteer, native Chrome installations often silently reject unpacked extensions due to `AutomationControlled` flags. To fix this, do not bind to the native Chrome `channel: 'chrome'`. Instead, use Playwright's bundled Chromium which bypasses this restriction. See the multi-recorder documentation in `README.md`.
-
 - **You need to test many unrelated sites**  
   Use the reusable wildcard config from Live Test. For production-like behavior, use an exact site config from Workspace.
-
-## Replaying Automations with UASL (RAS)
-
-If your extension needs to perform bulk form-filling or record-and-replay tasks, you can leverage the **Unified Automation Script Language (UASL)**.
-UASL (exported as `.ras.json`) uses a **Selector Cascade** (CSS -> XPath -> Shadow DOM -> Text -> Vision API) to guarantee field fills even when the DOM changes.
-
-You can trigger a replay programmatically from your background script by sending a message to the `rover-preview-helper`:
-```js
-chrome.runtime.sendMessage({
-  type: 'FORM_REPLAY_START',
-  tabId: activeTabId,
-  parsedCSV: parsedRasObject // The object output from parseRAS()
-});
-```
-This bypasses fragile single-selector automation and leverages Rover's robust fallback systems.
 
 ## Guardrails
 
