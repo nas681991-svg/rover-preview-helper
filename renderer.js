@@ -21,10 +21,12 @@ async function refreshFiles() {
     div.className = 'file-item';
     div.textContent = file.name;
     div.addEventListener('click', async () => {
-      document.getElementById('editorTitle').textContent = file.name;
-      document.getElementById('editorContent').textContent = 'Loading...';
+      const titleEl = document.getElementById('editorTitle');
+      if (titleEl) titleEl.textContent = file.name;
+      const contentEl = document.getElementById('editorContent');
+      if (contentEl) contentEl.textContent = 'Loading...';
       const content = await window.api.readRecord(file.path);
-      document.getElementById('editorContent').textContent = content;
+      if (contentEl) contentEl.textContent = content;
     });
     
     if (file.name.endsWith('.skill.json')) {
@@ -35,26 +37,28 @@ async function refreshFiles() {
   });
 }
 
-document.getElementById('launchBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('launchBtn');
-  const statusEl = document.getElementById('status');
-  const modeSelect = document.getElementById('modeSelect');
-  const mode = modeSelect ? modeSelect.value : 'playwright-trace';
-  
-  btn.disabled = true;
-  statusEl.textContent = 'Checking for updates and launching... (This may take a minute on first run)';
-  try {
-    const result = await window.api.launchRecorder(mode);
-    if (result === 'success') {
-      statusEl.textContent = 'Browser closed. Telemetry saved.';
-      refreshFiles();
-    } else {
-      statusEl.textContent = 'Error: ' + result;
+const launchBtn = document.getElementById('launchBtn');
+if (launchBtn) {
+  launchBtn.addEventListener('click', async () => {
+    const statusEl = document.getElementById('status');
+    const modeSelect = document.getElementById('modeSelect');
+    const mode = modeSelect ? modeSelect.value : 'playwright-trace';
+    
+    launchBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Checking for updates and launching... (This may take a minute on first run)';
+    try {
+      const result = await window.api.launchRecorder(mode);
+      if (result === 'success') {
+        if (statusEl) statusEl.textContent = 'Browser closed. Telemetry saved.';
+        refreshFiles();
+      } else {
+        if (statusEl) statusEl.textContent = 'Error: ' + result;
+      }
+    } finally {
+      launchBtn.disabled = false;
     }
-  } finally {
-    btn.disabled = false;
-  }
-});
+  });
+}
 
 refreshFiles();
 setInterval(() => {
@@ -93,22 +97,28 @@ if (pdfUploadInput) {
     if (!file) return;
     
     const statusEl = document.getElementById('pdfUploadStatus');
-    statusEl.style.display = 'block';
-    statusEl.textContent = 'Parsing PDF...';
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.textContent = 'Parsing PDF...';
+    }
     
     try {
-      const buffer = await file.arrayBuffer();
-      const base64 = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(file);
+      });
       
       const result = await window.api.extractPdf(base64, file.name);
       if (result && result.ok) {
-        statusEl.textContent = 'Success! Added to Skills Library.';
+        if (statusEl) statusEl.textContent = 'Success! Added to Skills Library.';
         refreshFiles();
       } else {
-        statusEl.textContent = 'Error: ' + (result?.error || 'Unknown error');
+        if (statusEl) statusEl.textContent = 'Error: ' + (result?.error || 'Unknown error');
       }
     } catch (err) {
-      statusEl.textContent = 'Error: ' + err.message;
+      if (statusEl) statusEl.textContent = 'Error: ' + err.message;
     }
   });
 }

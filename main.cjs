@@ -32,7 +32,13 @@ function preseedChromePreferences(userDataDir, extensionPaths = []) {
 
   let prefs = {};
   if (fs.existsSync(prefsPath)) {
-    try { prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf-8')); } catch (_) { prefs = {}; }
+    try { 
+      prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf-8')); 
+    } catch (e) { 
+      console.warn('Preferences file corrupted, moving to backup to avoid clobbering:', prefsPath);
+      fs.renameSync(prefsPath, prefsPath + `.bak.${Date.now()}`);
+      prefs = {}; 
+    }
   }
 
   if (!prefs.extensions) prefs.extensions = {};
@@ -71,6 +77,7 @@ let mainWindow;
 let launchInProgress = false;
 
 ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
+  console.log('--- LAUNCH RECORDER CALLED WITH MODE:', mode);
   if (launchInProgress) return 'Error: Recording session already in progress.';
   launchInProgress = true;
   try {
@@ -117,14 +124,16 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       return `Error: Required extensions missing: ${plan.missingRequired.join(', ')}`;
     }
 
+    console.log('--- STARTING ACQUISITIONS ---');
     for (const source of plan.targetSources) {
       try {
+        console.log(`--- ACQUIRING: ${source.name} from ${source.url}`);
         await acquireExtension(source, sys);
+        console.log(`--- FINISHED ACQUIRING: ${source.name}`);
       } catch (e) {
         if (mode === 'all') {
           console.warn(`[WARN] ${source.name} update failed:`, e.message);
         } else {
-          // If we fail to acquire and it doesn't already exist, fail loud
           if (!fs.existsSync(source.extractDir)) {
              launchInProgress = false;
              return `Error: Failed to acquire ${source.name}: ${e.message}`;
@@ -132,6 +141,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
         }
       }
     }
+    console.log('--- ACQUISITIONS COMPLETE ---');
 
     const finalExtensions = [];
     for (const ext of plan.extensions) {
@@ -168,12 +178,14 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     // Pre-seed Chrome profile so extensions launch with Developer Mode on.
     preseedChromePreferences(userDataDir, finalExtensions);
 
+    console.log('--- LAUNCHING CHROMIUM ---');
     let context = null;
     let launchError = null;
     const channels = [undefined, 'chrome', 'msedge'];
 
     for (const channel of channels) {
       try {
+        console.log('--- TRYING CHANNEL:', channel);
         context = await chromium.launchPersistentContext(userDataDir, {
           channel,
           headless: false,
@@ -192,8 +204,10 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
             '--disable-infobars',
           ]
         });
+        console.log('--- CHANNEL SUCCESS:', channel);
         break; // successfully launched
       } catch (err) {
+        console.log('--- CHANNEL FAILED:', channel, err.message);
         launchError = { message: `${channel}: ${err.message}`, original: err };
       }
     }
@@ -202,9 +216,36 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       throw new Error(`Failed to launch browser. Please ensure Google Chrome or Microsoft Edge is installed on your system. Details: ${launchError?.message}`);
     }
 
+    try {
+      const bugbugCookies = require('./bugbug-cookies.json');
+      const mappedCookies = bugbugCookies.map(c => {
+        const cookie = {
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          expires: c.expirationDate,
+          httpOnly: c.httpOnly,
+          secure: c.secure
+        };
+        if (c.sameSite && c.sameSite !== "unspecified") {
+          cookie.sameSite = c.sameSite.charAt(0).toUpperCase() + c.sameSite.slice(1);
+        } else if (c.sameSite === "unspecified") {
+          cookie.sameSite = "None";
+        }
+        return cookie;
+      });
+      await context.addCookies(mappedCookies);
+      console.log('--- LOADED BUGBUG COOKIES ---');
+    } catch (e) {
+      console.warn('--- FAILED TO LOAD BUGBUG COOKIES ---', e.message);
+    }
+
+    console.log('--- STARTING TRACING ---');
     // Start Native Playwright Tracing with Chunking
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     await context.tracing.startChunk({ title: 'Chunk 1' });
+    console.log('--- TRACING STARTED ---');
 
     let chunkCount = 1;
     const chunkInterval = setInterval(async () => {
@@ -279,50 +320,56 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       unifiedStream.write(JSON.stringify({ type: 'framenavigated', url: frame.url(), name: frame.name(), ts: Date.now() }) + '\n');
     });
 
-    const closeStreams = () => {
+    const closeStreams = async () => {
       try {
-        unifiedStream.end();
-        sessionReplayStream.write('null]');
-        sessionReplayStream.end();
+        const endStream = (stream, trailingStr) => new Promise(resolve => {
+           if (trailingStr) stream.write(trailingStr);
+           stream.end(() => resolve());
+        });
+        
+        await Promise.all([
+           endStream(unifiedStream),
+           endStream(sessionReplayStream, 'null]')
+        ]);
 
         // ── Package Output into .mrec Archive ─────────────────────
-        setTimeout(() => {
-            try {
-              const zip = new AdmZip();
-              const telemetryPath = path.join(myRecordsPath, `unified-telemetry-${ts}.jsonl`);
-              const replayPath = path.join(myRecordsPath, `session-replay-${ts}.json`);
-              const tracePattern = `trace-${ts}`;
-              
-              if (fs.existsSync(telemetryPath)) zip.addLocalFile(telemetryPath);
-              if (fs.existsSync(replayPath)) zip.addLocalFile(replayPath);
-              
-              const files = fs.readdirSync(myRecordsPath);
-              files.filter(f => f.startsWith(tracePattern) && f.endsWith('.zip')).forEach(f => {
-                 zip.addLocalFile(path.join(myRecordsPath, f));
-              });
+        try {
+          const zip = new AdmZip();
+          const telemetryPath = path.join(myRecordsPath, `unified-telemetry-${ts}.jsonl`);
+          const replayPath = path.join(myRecordsPath, `session-replay-${ts}.json`);
+          const tracePattern = `trace-${ts}`;
+          
+          if (fs.existsSync(telemetryPath)) zip.addLocalFile(telemetryPath);
+          if (fs.existsSync(replayPath)) zip.addLocalFile(replayPath);
+          
+          const files = fs.readdirSync(myRecordsPath);
+          files.filter(f => f.startsWith(tracePattern) && f.endsWith('.zip')).forEach(f => {
+             zip.addLocalFile(path.join(myRecordsPath, f));
+          });
 
-              const archivePath = path.join(myRecordsPath, `recording-${ts}.mrec`);
-              zip.writeZip(archivePath);
-              console.log(`✅ Session packaged successfully into ${archivePath}`);
+          const archivePath = path.join(myRecordsPath, `recording-${ts}.mrec`);
+          zip.writeZip(archivePath);
+          console.log(`✅ Session packaged successfully into ${archivePath}`);
 
-              // Cleanup loose files
-              if (fs.existsSync(telemetryPath)) fs.unlinkSync(telemetryPath);
-              if (fs.existsSync(replayPath)) fs.unlinkSync(replayPath);
-              files.filter(f => f.startsWith(tracePattern) && f.endsWith('.zip')).forEach(f => {
-                 fs.unlinkSync(path.join(myRecordsPath, f));
-              });
+          // Cleanup loose files
+          if (fs.existsSync(telemetryPath)) fs.unlinkSync(telemetryPath);
+          if (fs.existsSync(replayPath)) fs.unlinkSync(replayPath);
+          files.filter(f => f.startsWith(tracePattern) && f.endsWith('.zip')).forEach(f => {
+             fs.unlinkSync(path.join(myRecordsPath, f));
+          });
 
-            } catch (err) {
-              console.error('❌ Failed to package .mrec archive:', err);
-            }
-        }, 3000); // Wait for streams to fully flush
+        } catch (err) {
+          console.error('❌ Failed to package .mrec archive:', err);
+        }
 
       } catch (_) { }
     };
     context.on('close', closeStreams);
 
+    console.log('--- ADDING RRWEB SCRIPT ---');
     // Add rrweb dependency
     await context.addInitScript({ path: path.join(__dirname, 'node_modules', 'rrweb', 'dist', 'rrweb.umd.min.cjs') });
+    console.log('--- ADDED RRWEB SCRIPT ---');
 
     await context.addInitScript(() => {
       // ── rrweb Session Replay ──────────────────────────────────────────
@@ -459,10 +506,13 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     // Safety net: stop tracing when the entire context closes
     context.on('close', () => void stopTracing());
 
+    console.log('--- GETTING PAGE 1 ---');
     const page1 = context.pages()[0] || await context.newPage();
+    console.log('--- GOT PAGE 1 ---');
 
     // ── Bidirectional CDP Integration ─────────────────────────────
     try {
+      console.log('--- STARTING CDP ---');
       const cdpSession = await context.newCDPSession(page1);
       await cdpSession.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
       cdpSession.on('Target.attachedToTarget', async (event) => {
@@ -471,6 +521,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
             console.log(`[CDP] Attached to extension: ${targetInfo.url}`);
          }
       });
+      console.log('--- CDP STARTED ---');
     } catch (e) {
       console.warn('[CDP] Failed to establish bidirectional channel:', e);
     }
@@ -483,16 +534,20 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
       await page1.goto('https://google.com');
     }
 
+    console.log('--- NAVIGATING EXT PAGE ---');
     const extPage = await context.newPage();
     await extPage.goto('chrome://extensions/');
     await extPage.bringToFront();
+    console.log('--- EXT PAGE NAVIGATED ---');
     // Wait for extensions to load and render
     await extPage.waitForTimeout(3000);
     // Request a desktop screenshot visually verifying the extensions page
+    console.log('--- WRITING SCREENSHOT REQUEST ---');
     fs.writeFileSync(path.join(__dirname, 'request_screenshot.txt'), 'capture');
     await extPage.waitForTimeout(2000); // Give daemon time to capture
     // Return to original page
     await page1.bringToFront();
+    console.log('--- SCREENSHOT DONE ---');
 
     let mcpProcess = null;
     if (mode === 'all') {
