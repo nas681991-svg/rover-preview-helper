@@ -217,28 +217,37 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     }
 
     try {
-      const bugbugCookies = require('./bugbug-cookies.json');
-      const mappedCookies = bugbugCookies.map(c => {
-        const cookie = {
-          name: c.name,
-          value: c.value,
-          domain: c.domain,
-          path: c.path,
-          expires: c.expirationDate,
-          httpOnly: c.httpOnly,
-          secure: c.secure
-        };
-        if (c.sameSite && c.sameSite !== "unspecified") {
-          cookie.sameSite = c.sameSite.charAt(0).toUpperCase() + c.sameSite.slice(1);
-        } else if (c.sameSite === "unspecified") {
-          cookie.sameSite = "None";
+      const loadCookies = async (filename, logName) => {
+        try {
+          const cookies = require(`./${filename}`);
+          const mappedCookies = cookies.map(c => {
+            const cookie = {
+              name: c.name,
+              value: c.value,
+              domain: c.domain,
+              path: c.path,
+              expires: c.expirationDate,
+              httpOnly: c.httpOnly,
+              secure: c.secure
+            };
+            if (c.sameSite && c.sameSite !== "unspecified") {
+              cookie.sameSite = c.sameSite.charAt(0).toUpperCase() + c.sameSite.slice(1);
+            } else if (c.sameSite === "unspecified") {
+              cookie.sameSite = "None";
+            }
+            return cookie;
+          });
+          await context.addCookies(mappedCookies);
+          console.log(`--- LOADED ${logName} COOKIES ---`);
+        } catch (e) {
+          console.warn(`--- FAILED TO LOAD ${logName} COOKIES ---`, e.message);
         }
-        return cookie;
-      });
-      await context.addCookies(mappedCookies);
-      console.log('--- LOADED BUGBUG COOKIES ---');
+      };
+
+      await loadCookies('bugbug-cookies.json', 'BUGBUG');
+      await loadCookies('rover-cookies.json', 'ROVER');
     } catch (e) {
-      console.warn('--- FAILED TO LOAD BUGBUG COOKIES ---', e.message);
+      console.warn('--- FAILED TO LOAD COOKIES ---', e.message);
     }
 
     console.log('--- STARTING TRACING ---');
