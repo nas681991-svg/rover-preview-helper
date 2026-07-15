@@ -108,16 +108,10 @@ This example is scoped to LinkedIn. Change `host_permissions` and `matches` for 
 Click the extension icon to inject Rover into the active tab.
 
 ```js
-const roverConfig = {
-  siteId: "your_site_id",
-  publicKey: "pk_site_...",
-  siteKeyId: "key_...",
-  apiBase: "https://agent.rtrvr.ai",
-  allowedDomains: ["linkedin.com"],
-  domainScopeMode: "registrable_domain",
-  openOnInit: true,
-  allowActions: true
-};
+// Clean up ephemeral state on worker startup
+chrome.runtime.onStartup.addListener(async () => {
+  await chrome.storage.session.clear();
+});
 
 chrome.action.onClicked.addListener(async tab => {
   if (!tab.id || !tab.url) return;
@@ -128,10 +122,22 @@ chrome.action.onClicked.addListener(async tab => {
     return;
   }
 
-  const config = {
-    ...roverConfig,
+  // Retrieve state resiliently from session storage
+  const sessionState = await chrome.storage.session.get("roverConfig");
+  const config = sessionState.roverConfig || {
+    siteId: "your_site_id",
+    publicKey: "pk_site_...",
+    siteKeyId: "key_...",
+    apiBase: "https://agent.rtrvr.ai",
+    allowedDomains: ["linkedin.com"],
+    domainScopeMode: "registrable_domain",
+    openOnInit: true,
+    allowActions: true,
     workerUrl: chrome.runtime.getURL("vendor/worker.js")
   };
+
+  // Persist active tab tracking
+  await chrome.storage.session.set({ lastInjectedTabId: tab.id });
 
   await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: false },
@@ -218,6 +224,23 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 
 - **Extensions not visible during automated testing**
   Our testing harness now supports dynamic extension management and automatically pins extensions to the toolbar by default. If you are building your own harness or launch scripts, ensure you update the `pinned_extensions` preference in the Chrome user data directory to keep your extension visible.
+  
+  Example snippet for pinning (Node.js):
+  ```javascript
+  const fs = require('fs');
+  const path = require('path');
+  const prefsPath = path.join(userDataDir, 'Default', 'Preferences');
+  
+  if (fs.existsSync(prefsPath)) {
+    const prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+    prefs.extensions = prefs.extensions || {};
+    prefs.extensions.pinned_extensions = prefs.extensions.pinned_extensions || [];
+    if (!prefs.extensions.pinned_extensions.includes(extensionId)) {
+      prefs.extensions.pinned_extensions.push(extensionId);
+      fs.writeFileSync(prefsPath, JSON.stringify(prefs));
+    }
+  }
+  ```
 
 - **You need to test many unrelated sites**  
   Use the reusable wildcard config from Live Test. For production-like behavior, use an exact site config from Workspace.

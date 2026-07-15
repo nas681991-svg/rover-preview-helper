@@ -252,7 +252,7 @@ The helper only uses packaged extension scripts injected with `chrome.scripting.
 Extensions can trigger Rover without using the Rover widget input, but the integration should be event-based:
 
 - inject Rover with a Workspace config;
-- inject a small MAIN-world bridge that can access `window.rover`;
+- inject a small MAIN-world bridge that can access `window.rover` (must be injected via `chrome.scripting.executeScript({ world: 'MAIN' })` to bypass strict CSPs);
 - call `rover.send(prompt)` from that bridge;
 - listen for `run_started`, `response_shown`, `run_completed`, and `error`;
 - relay results back to the extension background script for storage or backend calls.
@@ -317,7 +317,7 @@ The E2E suite covers:
 If you want to record forms using multiple systems concurrently (Bugbug, SeleniumBase, and the native Rover Recorder), you can launch the isolated local environment:
 
 ```bash
-node scripts/multi-recorder.mjs
+npm run record:all
 ```
 
 > **Note on Windows Security:** The multi-recorder and integration tests force Playwright to use its own bundled, hermetic Chromium build instead of your native Windows Chrome installation. This bypasses silent `AutomationControlled` extension rejections.
