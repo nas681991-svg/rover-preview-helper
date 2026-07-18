@@ -15,8 +15,8 @@ importers:
         specifier: ^0.0.77
         version: 0.0.77
       adm-zip:
-        specifier: ^0.5.18
-        version: 0.5.18
+        specifier: ^0.6.0
+        version: 0.6.0
       axe-core:
         specifier: ^4.12.1
         version: 4.12.1
@@ -281,9 +281,9 @@ packages:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  adm-zip@0.5.18:
-    resolution: {integrity: sha512-ufJnssQGbxzLNS1Ho9bCtX4rQKCCvoVuDLHoJyc3F9dOGDB4BkWs2Ci0kv53lqocAEQ/Cbi+I2XCsNYGqVYqng==}
-    engines: {node: '>=12.0'}
+  adm-zip@0.6.0:
+    resolution: {integrity: sha512-XleryMhbuksdKtofnWZ9Sk+4CUTbms4Mb/EU32SZwToAyZ5RgVos/ki8n+yr0LWHOGKuakbXTuuYNHLQjhddgg==}
+    engines: {node: '>=14.0'}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -1673,7 +1673,7 @@ snapshots:
 
   abbrev@4.0.0: {}
 
-  adm-zip@0.5.18: {}
+  adm-zip@0.6.0: {}
 
   agent-base@7.1.4: {}
 
