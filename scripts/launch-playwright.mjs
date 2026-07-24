@@ -3,6 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { applyFingerprintToContext } = require('../src/fingerprint-manager.cjs');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -89,6 +93,9 @@ async function attemptLaunch() {
     ]
   });
   
+  const fp = await applyFingerprintToContext(context);
+  console.log(`✅ Applied stealth anti-detect fingerprint (GPU: ${fp.webglRenderer}, RAM: ${fp.deviceMemory}GB, Cores: ${fp.hardwareConcurrency})`);
+
   const page = await context.newPage();
   await page.goto('chrome://extensions/');
   await page.bringToFront();

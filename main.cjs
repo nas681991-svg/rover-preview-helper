@@ -84,6 +84,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     const { chromium } = require('patchright');
     const AdmZip = require('adm-zip');
     const { resolveLaunchPlan, acquireExtension } = require('./src/launch-plan.cjs');
+    const { applyFingerprintToContext, generateFingerprintSeed } = require('./src/fingerprint-manager.cjs');
 
     fs.mkdirSync(extDataDir, { recursive: true });
 
@@ -178,7 +179,7 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
     // Pre-seed Chrome profile so extensions launch with Developer Mode on.
     preseedChromePreferences(userDataDir, finalExtensions);
 
-    console.log('--- LAUNCHING CHROMIUM ---');
+    console.log('--- LAUNCHING CHROMIUM WITH SOTA ANTI-DETECT FINGERPRINT ---');
     let context = null;
     let launchError = null;
     const channels = [undefined, 'chrome', 'msedge'];
@@ -204,7 +205,10 @@ ipcMain.handle('launch-recorder', async (event, mode = 'playwright-trace') => {
             '--disable-infobars',
           ]
         });
-        console.log('--- CHANNEL SUCCESS:', channel);
+        
+        // Inject anti-detect fingerprint scripts
+        const fp = await applyFingerprintToContext(context);
+        console.log('--- CHANNEL SUCCESS & FINGERPRINT APPLIED ---', channel, fp.webglRenderer);
         break; // successfully launched
       } catch (err) {
         console.log('--- CHANNEL FAILED:', channel, err.message);
